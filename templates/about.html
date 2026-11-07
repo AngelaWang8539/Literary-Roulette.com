@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}About - Literary Roulette{% endblock %}
+{% block main %}
+<article class="prose">
+  {% if missing_link %}<p class="demo-notice" role="alert">That link is not available for this book. Head back to the passage and try another option.</p>{% endif %}
+  <h1>About Literary Roulette</h1>
+  <h2 id="how">How it works</h2>
+  <p>You are shown one passage without the book&rsquo;s title or author. You can read another passage from the same book, reveal the book, or spin to a different book. Any of these is available at any time.</p>
+  <h2 id="rights">Content rights</h2>
+  <p>This release is an English-only prototype with a 40-title catalogue. Complete text files are prepared locally by the import tool and become available only after the source metadata and text checks pass. The download archive includes the catalogue and importer, but not the full ebook files themselves.</p>
+  <p>Project Gutenberg identifies the linked editions as public domain in the United States, but automated import checks are not legal advice or a complete rights review. Check the specific edition and the law in every territory where you plan to operate. Reading, borrowing and buying links appear only when a valid destination has been configured.</p>
+  <p>The language bar currently marks English as the only active collection. German and Chinese are reserved for a later update and do not work as filters yet.</p>
+  <p>Rights and content enquiries: {{ site.contact_email }}</p>
+  <h2 id="privacy">Privacy</h2>
+  <p>The site keeps aggregate event records such as &ldquo;passage shown&rdquo; or &ldquo;link opened&rdquo;, linked to internal book and passage IDs. It does not store names, accounts or IP addresses in those records. History, saved books, and user-uploaded ebooks stay in the current browser; uploaded content is not sent to the server. A link click shows interest only; it does not mean a book was bought. Your hosting provider may keep its own server logs, which should be reviewed before a public launch.</p>
+  <p><a href="{{ url_for('index') }}">Back to the passage</a></p>
+</article>
+{% endblock %}

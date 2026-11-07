@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "description": "Maps the existing bNNN.txt downloads to the website catalogue IDs by matching Gutenberg eBook numbers. Source texts are not duplicated or modified by this map.",
+  "books": {
+    "adventures-of-sherlock-holmes": {
+      "gutenberg_id": 1661,
+      "source_file": "b001.txt",
+      "source_catalogue_id": "b001",
+      "source_title": "The Adventures of Sherlock Holmes"
+    },
+    "hound-of-the-baskervilles": {
+      "gutenberg_id": 2852,
+      "source_file": "b002.txt",
+      "source_catalogue_id": "b002",
+      "source_title": "The Hound of the Baskervilles"
+    },
+    "alices-adventures-in-wonderland": {
+      "gutenberg_id": 11,
+      "source_file": "b003.txt",
+      "source_catalogue_id": "b003",
+      "source_title": "Alice's Adventures in Wonderland"
+    },
+    "the-great-gatsby": {
+      "gutenberg_id": 64317,
+      "source_file": "b004.txt",
+      "source_catalogue_id": "b004",
+      "source_title": "The Great Gatsby"
+    },
+    "pride-and-prejudice": {
+      "gutenberg_id": 1342,
+      "source_file": "b005.txt",
+      "source_catalogue_id": "b005",
+      "source_title": "Pride and Prejudice"
+    },
+    "frankenstein": {
+      "gutenberg_id": 84,
+      "source_file": "b006.txt",
+      "source_catalogue_id": "b006",
+      "source_title": "Frankenstein; or, The Modern Prometheus"
+    },
+    "dracula": {
+      "gutenberg_id": 345,
+      "source_file": "b007.txt",
+      "source_catalogue_id": "b007",
+      "source_title": "Dracula"
+    },
+    "jekyll-and-hyde": {
+      "gutenberg_id": 43,
+      "source_file": "b008.txt",
+      "source_catalogue_id": "b008",
+      "source_title": "The Strange Case of Dr. Jekyll and Mr. Hyde"
+    },
+    "picture-of-dorian-gray": {
+      "gutenberg_id": 174,
+      "source_file": "b009.txt",
+      "source_catalogue_id": "b009",
+      "source_title": "The Picture of Dorian Gray"
+    },
+    "romeo-and-juliet": {
+      "gutenberg_id": 1513,
+      "source_file": "b010.txt",
+      "source_catalogue_id": "b010",
+      "source_title": "Romeo and Juliet"
+    },
+    "midsummer-nights-dream": {
+      "gutenberg_id": 1514,
+      "source_file": "b011.txt",
+      "source_catalogue_id": "b011",
+      "source_title": "A Midsummer Night's Dream"
+    },
+    "christmas-carol": {
+      "gutenberg_id": 46,
+      "source_file": "b013.txt",
+      "source_catalogue_id": "b013",
+      "source_title": "A Christmas Carol"
+    },
+    "adventures-of-tom-sawyer": {
+      "gutenberg_id": 74,
+      "source_file": "b014.txt",
+      "source_catalogue_id": "b014",
+      "source_title": "The Adventures of Tom Sawyer"
+    },
+    "wonderful-wizard-of-oz": {
+      "gutenberg_id": 55,
+      "source_file": "b015.txt",
+      "source_catalogue_id": "b015",
+      "source_title": "The Wonderful Wizard of Oz"
+    },
+    "treasure-island": {
+      "gutenberg_id": 120,
+      "source_file": "b016.txt",
+      "source_catalogue_id": "b016",
+      "source_title": "Treasure Island"
+    },
+    "jane-eyre": {
+      "gutenberg_id": 1260,
+      "source_file": "b018.txt",
+      "source_catalogue_id": "b018",
+      "source_title": "Jane Eyre"
+    },
+    "secret-garden": {
+      "gutenberg_id": 17396,
+      "source_file": "b019.txt",
+      "source_catalogue_id": "b019",
+      "source_title": "The Secret Garden"
+    },
+    "time-machine": {
+      "gutenberg_id": 35,
+      "source_file": "b020.txt",
+      "source_catalogue_id": "b020",
+      "source_title": "The Time Machine"
+    },
+    "war-of-the-worlds": {
+      "gutenberg_id": 36,
+      "source_file": "b021.txt",
+      "source_catalogue_id": "b021",
+      "source_title": "The War of the Worlds"
+    },
+    "call-of-the-wild": {
+      "gutenberg_id": 215,
+      "source_file": "b022.txt",
+      "source_catalogue_id": "b022",
+      "source_title": "The Call of the Wild"
+    },
+    "moby-dick": {
+      "gutenberg_id": 2701,
+      "source_file": "b023.txt",
+      "source_catalogue_id": "b023",
+      "source_title": "Moby-Dick; or, The Whale"
+    },
+    "anne-of-green-gables": {
+      "gutenberg_id": 45,
+      "source_file": "b024.txt",
+      "source_catalogue_id": "b024",
+      "source_title": "Anne of Green Gables"
+    },
+    "tale-of-two-cities": {
+      "gutenberg_id": 98,
+      "source_file": "b025.txt",
+      "source_catalogue_id": "b025",
+      "source_title": "A Tale of Two Cities"
+    },
+    "scarlet-pimpernel": {
+      "gutenberg_id": 60,
+      "source_file": "b027.txt",
+      "source_catalogue_id": "b027",
+      "source_title": "The Scarlet Pimpernel"
+    },
+    "moonstone": {
+      "gutenberg_id": 155,
+      "source_file": "b028.txt",
+      "source_catalogue_id": "b028",
+      "source_title": "The Moonstone"
+    },
+    "man-who-was-thursday": {
+      "gutenberg_id": 1695,
+      "source_file": "b031.txt",
+      "source_catalogue_id": "b031",
+      "source_title": "The Man Who Was Thursday"
+    },
+    "lost-world": {
+      "gutenberg_id": 139,
+      "source_file": "b032.txt",
+      "source_catalogue_id": "b032",
+      "source_title": "The Lost World"
+    },
+    "king-in-yellow": {
+      "gutenberg_id": 8492,
+      "source_file": "b034.txt",
+      "source_catalogue_id": "b034",
+      "source_title": "The King in Yellow"
+    },
+    "five-children-and-it": {
+      "gutenberg_id": 778,
+      "source_file": "b036.txt",
+      "source_catalogue_id": "b036",
+      "source_title": "Five Children and It"
+    },
+    "railway-children": {
+      "gutenberg_id": 1874,
+      "source_file": "b037.txt",
+      "source_catalogue_id": "b037",
+      "source_title": "The Railway Children"
+    },
+    "flatland": {
+      "gutenberg_id": 97,
+      "source_file": "b038.txt",
+      "source_catalogue_id": "b038",
+      "source_title": "Flatland: A Romance of Many Dimensions"
+    },
+    "raffles-amateur-cracksman": {
+      "gutenberg_id": 706,
+      "source_file": "b039.txt",
+      "source_catalogue_id": "b039",
+      "source_title": "The Amateur Cracksman (Raffles stories)"
+    },
+    "three-men-in-a-boat": {
+      "gutenberg_id": 308,
+      "source_file": "b040.txt",
+      "source_catalogue_id": "b040",
+      "source_title": "Three Men in a Boat (To Say Nothing of the Dog)"
+    }
+  },
+  "not_mapped": {
+    "island-of-doctor-moreau": {
+      "gutenberg_id": 159,
+      "title": "The Island of Doctor Moreau",
+      "reason": "No compatible local source file was mapped. The earlier b033 entry was for Gutenberg #28840, whereas this website catalogue entry is Gutenberg #159; the local b033.txt file was also unavailable."
+    }
+  }
+}

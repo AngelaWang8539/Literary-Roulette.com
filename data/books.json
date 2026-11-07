@@ -1,0 +1,1109 @@
+[
+  {
+    "id": "adventures-of-sherlock-holmes",
+    "title": "The Adventures of Sherlock Holmes",
+    "author": "Arthur Conan Doyle",
+    "genres": [
+      "Mystery",
+      "Detective fiction"
+    ],
+    "description": "Twelve cases in which Sherlock Holmes and Dr Watson unravel strange clues, hidden motives, and puzzles in Victorian London.",
+    "publication": {
+      "year": "1892"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1661,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1661"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "To Sherlock Holmes she is always"
+  },
+  {
+    "id": "hound-of-the-baskervilles",
+    "title": "The Hound of the Baskervilles",
+    "author": "Arthur Conan Doyle",
+    "genres": [
+      "Mystery",
+      "Gothic suspense"
+    ],
+    "description": "A family curse, a sinister hound, and a lonely moor draw Holmes and Watson into one of their most atmospheric investigations.",
+    "publication": {
+      "year": "1902"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 2852,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/2852"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "(?i)Mr\\. Sherlock Holmes"
+  },
+  {
+    "id": "alices-adventures-in-wonderland",
+    "title": "Alice's Adventures in Wonderland",
+    "author": "Lewis Carroll",
+    "genres": [
+      "Fantasy",
+      "Children's literature",
+      "Humor"
+    ],
+    "description": "Alice follows a white rabbit into a topsy-turvy world where logic, language, and manners behave in wonderfully unexpected ways.",
+    "publication": {
+      "year": "1865"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 11,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/11"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Alice was beginning to get very tired"
+  },
+  {
+    "id": "the-great-gatsby",
+    "title": "The Great Gatsby",
+    "author": "F. Scott Fitzgerald",
+    "genres": [
+      "Literary fiction",
+      "Jazz Age"
+    ],
+    "description": "Nick Carraway is drawn into the glittering world of Jay Gatsby, whose extravagant parties conceal longing, reinvention, and disappointment.",
+    "publication": {
+      "year": "1925"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 64317,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/64317"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 30000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "In my younger and more vulnerable years",
+    "gutenberg_title_match": "The Great Gatsby"
+  },
+  {
+    "id": "pride-and-prejudice",
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "genres": [
+      "Romance",
+      "Comedy of manners"
+    ],
+    "description": "Elizabeth Bennet and Mr Darcy misjudge one another in a witty story of first impressions, family expectations, and love.",
+    "publication": {
+      "year": "1813"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1342,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1342"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "It is a truth universally acknowledged"
+  },
+  {
+    "id": "frankenstein",
+    "title": "Frankenstein",
+    "author": "Mary Shelley",
+    "genres": [
+      "Gothic",
+      "Science fiction"
+    ],
+    "description": "Victor Frankenstein creates a living being, then recoils from the consequences of his own ambition.",
+    "publication": {
+      "year": "1818"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 84,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/84"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "(?i)st\\. petersburgh",
+    "gutenberg_title_match": "Frankenstein"
+  },
+  {
+    "id": "dracula",
+    "title": "Dracula",
+    "author": "Bram Stoker",
+    "genres": [
+      "Gothic horror",
+      "Epistolary fiction"
+    ],
+    "description": "Diaries and letters trace the arrival of a mysterious Transylvanian count and the people who try to stop him.",
+    "publication": {
+      "year": "1897"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 345,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/345"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "(?i)3 may\\. bistritz"
+  },
+  {
+    "id": "jekyll-and-hyde",
+    "title": "The Strange Case of Dr. Jekyll and Mr. Hyde",
+    "author": "Robert Louis Stevenson",
+    "genres": [
+      "Psychological horror",
+      "Mystery"
+    ],
+    "description": "A respectable London doctor hides a disturbing secret about the divided nature of his identity.",
+    "publication": {
+      "year": "1886"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 43,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/43"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Mr. Utterson the lawyer was a man of a rugged countenance"
+  },
+  {
+    "id": "picture-of-dorian-gray",
+    "title": "The Picture of Dorian Gray",
+    "author": "Oscar Wilde",
+    "genres": [
+      "Gothic",
+      "Philosophical fiction"
+    ],
+    "description": "A young man remains outwardly untouched by time while a portrait records the cost of his choices.",
+    "publication": {
+      "year": "1890"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 174,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/174"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "The studio was filled with the rich odour of roses"
+  },
+  {
+    "id": "romeo-and-juliet",
+    "title": "Romeo and Juliet",
+    "author": "William Shakespeare",
+    "genres": [
+      "Tragedy",
+      "Romance"
+    ],
+    "description": "Two young lovers try to make a life together amid a bitter feud between their families.",
+    "publication": {
+      "year": "1595"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1513,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1513"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Two households, both alike in dignity",
+    "gutenberg_title_match": "Romeo and Juliet"
+  },
+  {
+    "id": "midsummer-nights-dream",
+    "title": "A Midsummer Night's Dream",
+    "author": "William Shakespeare",
+    "genres": [
+      "Comedy",
+      "Fantasy"
+    ],
+    "description": "Lovers, amateur actors, and mischievous fairies collide in a forest full of mistaken intentions and magic.",
+    "publication": {
+      "year": "1595–1596"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1514,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1514"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Now, fair Hippolyta, our nuptial hour",
+    "gutenberg_title_match": "A Midsummer Night's Dream"
+  },
+  {
+    "id": "hamlet",
+    "title": "Hamlet",
+    "author": "William Shakespeare",
+    "genres": [
+      "Tragedy",
+      "Revenge"
+    ],
+    "description": "A prince investigates his father’s death while struggling with grief, doubt, betrayal, and revenge.",
+    "publication": {
+      "year": "1600–1601"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1524,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1524"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Who's there",
+    "gutenberg_title_match": "Hamlet"
+  },
+  {
+    "id": "christmas-carol",
+    "title": "A Christmas Carol",
+    "author": "Charles Dickens",
+    "genres": [
+      "Ghost story",
+      "Christmas",
+      "Transformation"
+    ],
+    "description": "A miser receives supernatural visits that force him to reconsider his past, present, and possible future.",
+    "publication": {
+      "year": "1843"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 46,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/46"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Marley was dead",
+    "gutenberg_title_match": "Christmas Carol"
+  },
+  {
+    "id": "adventures-of-tom-sawyer",
+    "title": "The Adventures of Tom Sawyer",
+    "author": "Mark Twain",
+    "genres": [
+      "Adventure",
+      "Humor",
+      "Coming of age"
+    ],
+    "description": "Tom’s schemes and escapades turn childhood mischief into a series of comic and sometimes dangerous adventures.",
+    "publication": {
+      "year": "1876"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 74,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/74"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "TOM!",
+    "gutenberg_title_match": "Adventures of Tom Sawyer"
+  },
+  {
+    "id": "wonderful-wizard-of-oz",
+    "title": "The Wonderful Wizard of Oz",
+    "author": "L. Frank Baum",
+    "genres": [
+      "Fantasy",
+      "Adventure"
+    ],
+    "description": "Dorothy and her companions follow the yellow brick road in search of courage, heart, wisdom, and home.",
+    "publication": {
+      "year": "1900"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 55,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/55"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Dorothy lived in the midst"
+  },
+  {
+    "id": "treasure-island",
+    "title": "Treasure Island",
+    "author": "Robert Louis Stevenson",
+    "genres": [
+      "Adventure",
+      "Pirates"
+    ],
+    "description": "A map leads young Jim Hawkins into a dangerous race for buried treasure with the charismatic Long John Silver.",
+    "publication": {
+      "year": "1883"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 120,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/120"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Squire Trelawney, Dr. Livesey"
+  },
+  {
+    "id": "little-women",
+    "title": "Little Women",
+    "author": "Louisa May Alcott",
+    "genres": [
+      "Family",
+      "Coming of age"
+    ],
+    "description": "The four March sisters navigate work, ambition, friendship, poverty, and growing up during the American Civil War.",
+    "publication": {
+      "year": "1868–1869"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 514,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/514"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Christmas won't be Christmas without any presents",
+    "gutenberg_title_match": "Little Women"
+  },
+  {
+    "id": "jane-eyre",
+    "title": "Jane Eyre",
+    "author": "Charlotte Brontë",
+    "genres": [
+      "Gothic romance",
+      "Coming of age"
+    ],
+    "description": "An orphaned governess seeks independence and love at Thornfield Hall, where her employer’s household holds a dark secret.",
+    "publication": {
+      "year": "1847"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 1260,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1260"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "There was no possibility of taking a walk",
+    "author_match": "Bront"
+  },
+  {
+    "id": "secret-garden",
+    "title": "The Secret Garden",
+    "author": "Frances Hodgson Burnett",
+    "genres": [
+      "Children's literature",
+      "Coming of age"
+    ],
+    "description": "A lonely child discovers a locked garden and helps transform the lives of the people around it.",
+    "publication": {
+      "year": "1911"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 17396,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/17396"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "When Mary Lennox was sent to Misselthwaite Manor"
+  },
+  {
+    "id": "time-machine",
+    "title": "The Time Machine",
+    "author": "H. G. Wells",
+    "genres": [
+      "Science fiction",
+      "Adventure"
+    ],
+    "description": "A Victorian inventor travels far into the future and finds unsettling evidence of how humanity may change.",
+    "publication": {
+      "year": "1895"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 35,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/35"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "The Time Traveller \\(for so it will be convenient"
+  },
+  {
+    "id": "war-of-the-worlds",
+    "title": "The War of the Worlds",
+    "author": "H. G. Wells",
+    "genres": [
+      "Science fiction",
+      "Invasion"
+    ],
+    "description": "A Martian invasion shatters everyday life and reveals how fragile human confidence can be.",
+    "publication": {
+      "year": "1898"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 36,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/36"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "No one would have believed in the last years"
+  },
+  {
+    "id": "call-of-the-wild",
+    "title": "The Call of the Wild",
+    "author": "Jack London",
+    "genres": [
+      "Adventure",
+      "Animal fiction"
+    ],
+    "description": "A domesticated dog is thrust into the brutal Yukon gold rush and must adapt to a world ruled by survival.",
+    "publication": {
+      "year": "1903"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 215,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/215"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Buck did not read the newspapers"
+  },
+  {
+    "id": "moby-dick",
+    "title": "Moby-Dick; or, The Whale",
+    "author": "Herman Melville",
+    "genres": [
+      "Adventure",
+      "Sea story",
+      "Literary fiction"
+    ],
+    "description": "Ishmael joins Captain Ahab’s obsessive pursuit of a great white whale across the open sea.",
+    "publication": {
+      "year": "1851"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 2701,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/2701"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Call me Ishmael",
+    "gutenberg_title_match": "Moby-Dick"
+  },
+  {
+    "id": "anne-of-green-gables",
+    "title": "Anne of Green Gables",
+    "author": "L. M. Montgomery",
+    "genres": [
+      "Coming of age",
+      "Humor"
+    ],
+    "description": "An imaginative, talkative orphan changes the lives of two siblings who unexpectedly adopt her.",
+    "publication": {
+      "year": "1908"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 45,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/45"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Mrs. Rachel Lynde lived just where the Avonlea main road dipped down",
+    "gutenberg_title_match": "Anne of Green Gables"
+  },
+  {
+    "id": "tale-of-two-cities",
+    "title": "A Tale of Two Cities",
+    "author": "Charles Dickens",
+    "genres": [
+      "Historical fiction",
+      "Drama"
+    ],
+    "description": "Lives in London and Paris become entangled during the French Revolution, in a story of danger, sacrifice, and renewal.",
+    "publication": {
+      "year": "1859"
+    },
+    "language": "en",
+    "familiarity": "classic",
+    "gutenberg_id": 98,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/98"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "It was the best of times"
+  },
+  {
+    "id": "prisoner-of-zenda",
+    "title": "The Prisoner of Zenda",
+    "author": "Anthony Hope",
+    "genres": [
+      "Adventure",
+      "Political intrigue",
+      "Romance"
+    ],
+    "description": "A tourist who resembles a king is persuaded to impersonate him, turning a temporary deception into a dangerous royal plot.",
+    "publication": {
+      "year": "1894"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 95,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/95"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "I was born in the year 1854"
+  },
+  {
+    "id": "scarlet-pimpernel",
+    "title": "The Scarlet Pimpernel",
+    "author": "Baroness Orczy",
+    "genres": [
+      "Historical adventure",
+      "Secret identity"
+    ],
+    "description": "A seemingly frivolous English aristocrat secretly rescues people from the French Revolution’s Reign of Terror.",
+    "publication": {
+      "year": "1905"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 60,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/60"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "A surging, seething, murmuring crowd of beings"
+  },
+  {
+    "id": "moonstone",
+    "title": "The Moonstone",
+    "author": "Wilkie Collins",
+    "genres": [
+      "Mystery",
+      "Detective fiction"
+    ],
+    "description": "A priceless diamond disappears, and the shifting accounts of different witnesses slowly reveal a complex mystery.",
+    "publication": {
+      "year": "1868"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 155,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/155"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "I address these lines"
+  },
+  {
+    "id": "woman-in-white",
+    "title": "The Woman in White",
+    "author": "Wilkie Collins",
+    "genres": [
+      "Gothic mystery",
+      "Suspense"
+    ],
+    "description": "A drawing teacher’s encounter with a mysterious woman leads into a tangle of secrets, deception, and conspiracy.",
+    "publication": {
+      "year": "1860"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 583,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/583"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "This is the story of what a Woman's patience can endure"
+  },
+  {
+    "id": "thirty-nine-steps",
+    "title": "The Thirty-Nine Steps",
+    "author": "John Buchan",
+    "genres": [
+      "Thriller",
+      "Espionage",
+      "Adventure"
+    ],
+    "description": "An ordinary man becomes caught in an international conspiracy and must flee while trying to uncover the truth.",
+    "publication": {
+      "year": "1915"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 558,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/558"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "I returned from the City about three o'clock"
+  },
+  {
+    "id": "man-who-was-thursday",
+    "title": "The Man Who Was Thursday",
+    "author": "G. K. Chesterton",
+    "genres": [
+      "Mystery",
+      "Satire",
+      "Surreal fiction"
+    ],
+    "description": "A detective infiltrates an anarchist circle, only to find that the conspiracy is stranger than he imagined.",
+    "publication": {
+      "year": "1908"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 1695,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1695"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "The suburb of Saffron Park lay on the sunset side of London"
+  },
+  {
+    "id": "lost-world",
+    "title": "The Lost World",
+    "author": "Arthur Conan Doyle",
+    "genres": [
+      "Adventure",
+      "Science fiction"
+    ],
+    "description": "An expedition searches for a remote plateau where prehistoric creatures may have survived.",
+    "publication": {
+      "year": "1912"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 139,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/139"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Mr. Hungerton, her father"
+  },
+  {
+    "id": "island-of-doctor-moreau",
+    "title": "The Island of Doctor Moreau",
+    "author": "H. G. Wells",
+    "genres": [
+      "Science fiction",
+      "Horror"
+    ],
+    "description": "A shipwrecked man discovers an isolated island where a scientist conducts disturbing experiments on living creatures.",
+    "publication": {
+      "year": "1896"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 159,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/159"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "On a certain winter's afternoon"
+  },
+  {
+    "id": "king-in-yellow",
+    "title": "The King in Yellow",
+    "author": "Robert W. Chambers",
+    "genres": [
+      "Weird fiction",
+      "Horror",
+      "Short stories"
+    ],
+    "description": "A collection of unsettling stories linked by a mysterious play whose influence seems to distort reality.",
+    "publication": {
+      "year": "1895"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 8492,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/8492"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "Toward the end of the year 1920 the Government"
+  },
+  {
+    "id": "mysterious-island",
+    "title": "The Mysterious Island",
+    "author": "Jules Verne",
+    "genres": [
+      "Adventure",
+      "Science fiction",
+      "Survival"
+    ],
+    "description": "Castaways use ingenuity to survive on a remote island while unexplained events hint that they are not alone.",
+    "publication": {
+      "year": "1874–1875"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 1268,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1268"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "On the 24th of March, 1865"
+  },
+  {
+    "id": "five-children-and-it",
+    "title": "Five Children and It",
+    "author": "E. Nesbit",
+    "genres": [
+      "Children's literature",
+      "Fantasy",
+      "Humor"
+    ],
+    "description": "Five siblings discover a wish-granting sand-fairy, but every wish comes with unexpected consequences.",
+    "publication": {
+      "year": "1902"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 778,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/778"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "The house was three miles from the station"
+  },
+  {
+    "id": "railway-children",
+    "title": "The Railway Children",
+    "author": "E. Nesbit",
+    "genres": [
+      "Family",
+      "Adventure",
+      "Coming of age"
+    ],
+    "description": "Three siblings move to the countryside and find comfort, mystery, and friendship around a nearby railway.",
+    "publication": {
+      "year": "1906"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 1874,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/1874"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "They were not railway children to begin with"
+  },
+  {
+    "id": "flatland",
+    "title": "Flatland: A Romance of Many Dimensions",
+    "author": "Edwin A. Abbott",
+    "genres": [
+      "Satire",
+      "Mathematical fiction",
+      "Speculative fiction"
+    ],
+    "description": "A two-dimensional narrator imagines worlds beyond his own and questions the limits of perception and social hierarchy.",
+    "publication": {
+      "year": "1884"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 97,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/97"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "I call our world Flatland"
+  },
+  {
+    "id": "raffles-amateur-cracksman",
+    "title": "Raffles: The Amateur Cracksman",
+    "author": "E. W. Hornung",
+    "genres": [
+      "Crime",
+      "Mystery",
+      "Short stories"
+    ],
+    "description": "A. J. Raffles, a celebrated cricket player and gentleman of society, leads a secret double life as a jewel thief.",
+    "publication": {
+      "year": "1899"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 706,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/706"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "author_match": "Hornung",
+    "gutenberg_title_match": "Amateur Cracksman",
+    "text_start_pattern": "It was half-past twelve when I returned to the Albany"
+  },
+  {
+    "id": "three-men-in-a-boat",
+    "title": "Three Men in a Boat",
+    "author": "Jerome K. Jerome",
+    "genres": [
+      "Comedy",
+      "Travel",
+      "Humor"
+    ],
+    "description": "Three friends and a dog set out on a river holiday that becomes a succession of comic mishaps.",
+    "publication": {
+      "year": "1889"
+    },
+    "language": "en",
+    "familiarity": "discovery",
+    "gutenberg_id": 308,
+    "source": {
+      "name": "Project Gutenberg",
+      "url": "https://www.gutenberg.org/ebooks/308"
+    },
+    "rights_status": "pending_verification",
+    "territory": "US",
+    "cover": null,
+    "links": {},
+    "min_words": 8000,
+    "source_note": "Project Gutenberg edition candidate; import-time metadata/text checks are not a substitute for rights review.",
+    "text_start_pattern": "There were four of us"
+  }
+]

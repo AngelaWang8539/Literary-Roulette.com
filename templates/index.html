@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block main %}
+<div id="view-roulette">
+<p id="storage-warning" class="banner warn" hidden>Your browser is blocking local storage (private browsing?). History, saved books and uploads will only last until you close this tab.</p>
+<p id="mode-banner" class="banner" hidden>You are spinning from your own uploaded books. They stay in this browser and are never sent to the server.</p>
+<p class="intro">Read a passage with no title attached. Keep reading, find out where it comes from, or move on to a different book.</p>
+
+<div class="stage">
+  <section class="passage-card" aria-labelledby="passage-label">
+    <div class="passage-scroll">
+    <h2 id="passage-label" class="card-label">A passage from an unnamed book</h2>
+    <blockquote id="passage-text" class="passage-text" tabindex="-1">Loading your first passage&hellip;</blockquote>
+    <p id="passage-note" class="passage-note" hidden></p>
+    <button id="start" class="btn start" type="button" hidden>Spin for a passage</button>
+    <noscript><p class="passage-note">Literary Roulette needs JavaScript to show passages. Please turn it on and reload.</p></noscript>
+    <svg class="flourish" viewBox="0 0 120 12" aria-hidden="true" focusable="false"><path d="M2 6h46M72 6h46" stroke="currentColor" stroke-width="1" fill="none"/><path d="M60 1l5 5-5 5-5-5z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="panel-title">
+    <h2 id="panel-title">What would you like to do?</h2>
+    <p class="panel-sub">Pick any option, in any order, at any time.</p>
+    <div class="actions">
+      <button id="btn-another" class="btn action main" type="button" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="txt"><span class="label">Another passage from this book</span><span class="sub">Keep reading the same book, still unnamed</span></span>
+      </button>
+      <button id="btn-reveal" class="btn action" type="button" disabled aria-expanded="false" aria-controls="book-details">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <span class="txt"><span id="reveal-label" class="label">Reveal this book</span><span id="reveal-sub" class="sub">See the title, author and where to read it</span></span>
+      </button>
+      <button id="btn-spin" class="btn action" type="button" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5.5c3-1.6 6-1.6 8 .5 2-2.1 5-2.1 8-.5v13c-3-1.6-6-1.6-8 .5-2-2.1-5-2.1-8-.5z M12 6v13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span class="txt"><span class="label">Spin another book</span><span class="sub">Start fresh with a different, hidden book</span></span>
+      </button>
+      <a id="btn-upload" class="btn" href="#upload">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="txt"><span class="label">Upload my book</span><span class="sub">Spin from your own .txt or .epub, kept in this browser</span></span>
+      </a>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <h3 class="journey-title">This visit</h3>
+    <dl class="journey">
+      <div><dt>Passages read</dt><dd id="count-passages">0</dd></div>
+      <div><dt>Books revealed</dt><dd id="count-books">0</dd></div>
+      <div><dt>Links opened</dt><dd id="count-links">0</dd></div>
+    </dl>
+  </section>
+</div>
+
+<section id="book-details" class="details" aria-labelledby="book-title" tabindex="-1" hidden>
+  <div id="cover" class="cover" aria-hidden="true"></div>
+  <div class="details-body">
+    <p id="demo-notice" class="demo-notice" hidden>Demonstration book: the text is fictional and written for testing. Any links shown are placeholders, not real stores.</p>
+    <h2 id="book-title"></h2>
+    <p id="book-author" class="author"></p>
+    <ul id="book-genres" class="chips" aria-label="Genres"></ul>
+    <p id="book-description" class="description"></p>
+    <p id="book-publication" class="meta" hidden></p>
+    <p id="book-source" class="meta" hidden></p>
+    <h3>Where to go next</h3>
+    <ul id="book-links" class="links"></ul>
+    <p id="no-links" class="meta" hidden>No reading, borrowing or buying links have been added for this book yet.</p>
+    <p id="credit" class="meta" hidden></p>
+    <p id="content-note" class="demo-notice" hidden></p>
+    <div class="row">
+      <button id="btn-save" class="btn quiet" type="button" aria-pressed="false">Save this book</button>
+      <button id="btn-hide" class="btn quiet" type="button">Hide book details</button>
+    </div>
+    <div id="awareness" class="awareness" role="group" aria-labelledby="aw-q" hidden>
+      <p id="aw-q">Had you heard of this book before today?</p>
+      <button class="btn quiet" type="button" data-answer="known">Yes</button>
+      <button class="btn quiet" type="button" data-answer="unknown">No</button>
+      <button class="btn quiet" type="button" data-answer="unsure">Not sure</button>
+    </div>
+  </div>
+</section>
+</div>
+
+<section id="view-history" class="view" aria-labelledby="h-title" hidden>
+  <h2 id="h-title" tabindex="-1">My History</h2>
+  <p class="meta">Every passage you have seen is kept in this browser only. It does not sync to other devices and is never sent to the server. Opening a passage does not reveal its book.</p>
+  <div class="toolbar">
+    <label>Search<input id="h-query" type="search" placeholder="Words from a passage"></label>
+    <label>Show<select id="h-filter"><option value="all">All passages</option><option value="revealed">Book revealed</option><option value="hidden">Book not revealed</option></select></label>
+    <button id="h-clear" class="btn quiet" type="button">Clear all history</button>
+  </div>
+  <p id="h-count" class="meta" role="status"></p>
+  <ul id="h-list" class="cards"></ul>
+  <p id="h-empty" class="meta" hidden>Nothing here yet. Spin a passage and it will appear in your history.</p>
+</section>
+
+<section id="view-saved" class="view" aria-labelledby="s-title" hidden>
+  <h2 id="s-title" tabindex="-1">My Saved Books</h2>
+  <p class="meta">Books you chose to save after revealing them. Kept in this browser only.</p>
+  <ul id="s-list" class="cards"></ul>
+  <p id="s-empty" class="meta" hidden>No saved books yet. Reveal a book, then choose &ldquo;Save this book&rdquo;.</p>
+</section>
+
+<section id="view-upload" class="view" aria-labelledby="u-title" hidden>
+  <h2 id="u-title" tabindex="-1">Upload my book</h2>
+  <div class="note">
+    <p><strong>Private by design.</strong> Your book is opened and stored inside this browser only (in IndexedDB). It is never uploaded to the server and never shown to other visitors. It will not follow you to another device or browser.</p>
+    <p>Supported: plain text (<code>.txt</code>) and <code>.epub</code> files up to 15 MB. Books protected by DRM cannot be opened, and Literary Roulette does not try to remove DRM. Only upload books you are entitled to use.</p>
+  </div>
+  <label class="filebox">Choose a .txt or .epub file<input id="u-file" type="file" accept=".txt,.epub,text/plain,application/epub+zip"></label>
+  <p id="u-status" class="status" role="status" aria-live="polite"></p>
+  <fieldset class="source-choice"><legend>Spin passages from</legend>
+    <label><input type="radio" name="source" value="catalogue" checked> The public catalogue</label>
+    <label><input type="radio" name="source" value="upload" id="u-radio-upload" disabled> My uploaded books</label>
+  </fieldset>
+  <h3>Your uploaded books</h3>
+  <ul id="u-list" class="cards"></ul>
+  <p id="u-empty" class="meta">No uploaded books yet.</p>
+</section>
+<dialog id="confirm-dialog" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+  <div class="confirm-body">
+    <h2 id="confirm-title">Are you sure?</h2>
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button id="confirm-cancel" class="btn" type="button" autofocus>Cancel</button>
+      <button id="confirm-ok" class="btn danger" type="button">Confirm</button>
+    </div>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/mobile-menu.js') }}" defer></script><script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}
