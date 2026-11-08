@@ -72,7 +72,7 @@ class FullTextCatalogueTests(Base):
         first = self.start()
         from app import create_app
         again = create_app(self.app.config.copy()).test_client()
-        res = again.post("/api/book/reveal", json={"token": first["token"]}).get_json()
+        res = again.post("/api/book/reveal", json={"book_token": first["book_token"]}).get_json()
         self.assertTrue(res["ok"])
 
     def test_reveal_is_metadata_only_and_never_restores_the_whole_cache(self):
