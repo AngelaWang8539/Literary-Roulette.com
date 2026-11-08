@@ -150,11 +150,14 @@ function openDetails(book) {
   ui.revealLabel.textContent = "Hide book details"; ui.revealSub.textContent = "Keep the passage, put the title away";
   refreshSaveButton();
 }
+function currentCataloguePayload(extra = {}) {
+  return { token: S.token, book_token: S.bookKey, ...extra };
+}
 function closeDetails(tellServer) {
   ui.details.hidden = true; S.detailsOpen = false; ui.awareness.hidden = true;
   ui.reveal.setAttribute("aria-expanded", "false");
   ui.revealLabel.textContent = "Reveal this book"; ui.revealSub.textContent = "See the title, author and where to read it";
-  if (tellServer && S.source === "catalogue" && S.token) api("/api/event", { token: S.token, event: "book_hidden" });
+  if (tellServer && S.source === "catalogue" && S.token) api("/api/event", currentCataloguePayload({ event: "book_hidden" }));
 }
 function afterReveal(book) {
   counts.books++; updateCounts(); openDetails(book);
@@ -205,17 +208,17 @@ const startCatalogue = () => act("start", "/api/passage/start", undefined, (d) =
 function onAnother() {
   if (!S.bookKey) return;
   if (S.source === "upload") return anotherUp();
-  act("another", "/api/passage/another", { token: S.token }, (d) => { showPassage(fromApi(d)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
+  act("another", "/api/passage/another", currentCataloguePayload(), (d) => { showPassage(fromApi(d)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
 }
 function onSpin() {
   if (!S.bookKey) return;
   if (S.source === "upload") return spinUp();
-  act("spin", "/api/book/spin", { token: S.token }, (d) => { showPassage(fromApi(d)); setStatus(d.notice || "A different book, hidden again. Read on."); });
+  act("spin", "/api/book/spin", currentCataloguePayload(), (d) => { showPassage(fromApi(d)); setStatus(d.notice || "A different book, hidden again. Read on."); });
 }
 async function doReveal() {
   if (!S.bookKey) return;
   if (S.source === "upload") { S.up.revealed = S.up.cur.bookId; return afterReveal(upPayload(upBook(S.up.cur.bookId))); }
-  return act("reveal", "/api/book/reveal", { token: S.token }, (d) => afterReveal(d.book));
+  return act("reveal", "/api/book/reveal", currentCataloguePayload(), (d) => afterReveal(d.book));
 }
 function onReveal() {
   if (!S.bookKey) return;
@@ -230,7 +233,7 @@ ui.hide.addEventListener("click", () => { onReveal(); ui.reveal.focus(); });
 ui.links.addEventListener("click", (e) => { if (e.target.closest("a")) { counts.links++; updateCounts(); } });
 ui.awareness.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-answer]"); if (!b || !S.token) return;
-  api("/api/event", { token: S.token, event: "awareness_" + b.dataset.answer });
+  api("/api/event", currentCataloguePayload({ event: "awareness_" + b.dataset.answer }));
   ui.awareness.hidden = true; setStatus("Thanks for answering.");
 });
 ui.save.addEventListener("click", async () => {
@@ -242,7 +245,7 @@ ui.save.addEventListener("click", async () => {
     const b = S.book;
     await lib.saveBook({ source: S.source, bookKey: S.bookKey, title: b.title, author: b.author, genres: b.genres || [], description: b.description || "",
       links: b.links || [], credit: b.source_credit || null, isUpload: !!b.is_upload, isDemo: !!b.is_demo, contentNote: b.content_note || null });
-    if (S.source === "catalogue" && S.token) api("/api/event", { token: S.token, event: "book_saved" });
+    if (S.source === "catalogue" && S.token) api("/api/event", currentCataloguePayload({ event: "book_saved" }));
     setStatus("Saved to My Saved Books on this device.");
   }
   refreshSaveButton();
