@@ -4,6 +4,7 @@ import hmac
 import json
 import random
 import re
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlparse
@@ -87,6 +88,7 @@ class Catalogue:
         self.books, self.passages, self.passages_by_book = {}, {}, {}
         self.text_books = set()
         self._active_books = OrderedDict()
+        self._cache_lock = threading.RLock()
         self.max_active_books = 2
 
         for b in books:
@@ -157,6 +159,10 @@ class Catalogue:
             self.passages_by_book.pop(bid, None)
 
     def ensure_book_loaded(self, bid):
+        with self._cache_lock:
+            return self._ensure_book_loaded(bid)
+
+    def _ensure_book_loaded(self, bid):
         """Load one verified local title and retain no more than two full books."""
         if bid not in self.books:
             raise KeyError(f"Unknown book: {bid}")
@@ -191,6 +197,10 @@ class Catalogue:
         return bid
 
     def add_external_book(self, book, text):
+        with self._cache_lock:
+            return self._add_external_book(book, text)
+
+    def _add_external_book(self, book, text):
         """Register one downloaded Gutenberg title and generate its passages."""
         bid = book["id"]
         if bid in self.books and self.passages_by_book.get(bid):
@@ -250,10 +260,11 @@ class Catalogue:
         return digest.hexdigest()[:12]
 
     def passage_by_token(self, token, book_id=None):
-        if book_id:
-            self.ensure_book_loaded(book_id)
-        pid = self._p_tokens.get(token) if isinstance(token, str) else None
-        return self.passages.get(pid)
+        with self._cache_lock:
+            if book_id:
+                self.ensure_book_loaded(book_id)
+            pid = self._p_tokens.get(token) if isinstance(token, str) else None
+            return self.passages.get(pid)
 
     def book_of(self, passage):
         return self.books[passage["book_id"]]
@@ -269,14 +280,16 @@ class Catalogue:
         return rng.choice(unseen or options)
 
     def pick_first(self, rng=random):
-        bid = rng.choice(self.book_ids)
-        self.ensure_book_loaded(bid)
-        return rng.choice(self.passages_by_book[bid])
+        with self._cache_lock:
+            bid = rng.choice(self.book_ids)
+            self.ensure_book_loaded(bid)
+            return rng.choice(self.passages_by_book[bid])
 
     def pick_other_passage(self, current, seen, rng=random):
-        self.ensure_book_loaded(current["book_id"])
-        options = [p for p in self.passages_by_book[current["book_id"]] if p["id"] != current["id"]]
-        return self._pick_unseen(options, seen, rng) if options else None
+        with self._cache_lock:
+            self.ensure_book_loaded(current["book_id"])
+            options = [p for p in self.passages_by_book[current["book_id"]] if p["id"] != current["id"]]
+            return self._pick_unseen(options, seen, rng) if options else None
 
     def pick_other_book(self, current_book_id, seen_book_tokens, rng=random):
         others = [b for b in self.book_ids if b != current_book_id]
@@ -286,8 +299,9 @@ class Catalogue:
         return rng.choice(fresh or others), not fresh
 
     def pick_in_book(self, book_id, seen, rng=random):
-        self.ensure_book_loaded(book_id)
-        return self._pick_unseen(self.passages_by_book[book_id], seen, rng)
+        with self._cache_lock:
+            self.ensure_book_loaded(book_id)
+            return self._pick_unseen(self.passages_by_book[book_id], seen, rng)
 
     def links_for(self, book):
         links = book.get("links") if isinstance(book.get("links"), dict) else {}
