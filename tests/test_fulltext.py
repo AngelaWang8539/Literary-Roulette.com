@@ -135,7 +135,7 @@ class FullTextCatalogueTests(Base):
     def test_missing_manifest_means_not_ready(self):
         cat = Catalogue([text_book("big", 1)], [], "s", None, None, Path("nowhere"), {})
         self.assertEqual(cat.book_ids, [])
-        self.assertIn("ingest", cat.unavailable["big"])
+        self.assertIn("tools/ingest_gutenberg.py", cat.unavailable["big"])
 
     def test_demo_fallback_only_while_no_real_text(self):
         demo = {"id": "d", "title": "Demo", "author": "X", "is_demo": True, "rights_status": "demo_placeholder"}
@@ -186,7 +186,7 @@ class FullTextCatalogueTests(Base):
 class IngestToolTests(unittest.TestCase):
     def run_tool(self, data_dir, raw_dir, *extra):
         return subprocess.run([sys.executable, str(ROOT / "tools" / "ingest_gutenberg.py"), "--data-dir", str(data_dir),
-                               "--from-dir", str(raw_dir), *extra], capture_output=True, text=True, cwd=ROOT)
+                               "--source-dir", str(raw_dir), *extra], capture_output=True, text=True, cwd=ROOT)
 
     def test_uncertain_story_start_is_not_marked_verified(self):
         # A valid Gutenberg wrapper and matching metadata are not enough if the
@@ -201,34 +201,60 @@ class IngestToolTests(unittest.TestCase):
         self.assertTrue(any("Story start not located with confidence" in w for w in info["warnings"]))
 
     def test_verifies_good_files_and_rejects_bad_ones(self):
+        # The current importer consumes already-cleaned local text plus an
+        # explicit Gutenberg-ID mapping; it does not parse raw Gutenberg
+        # headers or infer title/author from downloaded files.
         with tempfile.TemporaryDirectory() as tmp:
             data, raw = Path(tmp) / "data", Path(tmp) / "raw"
             data.mkdir(); raw.mkdir()
-            books = [{"id": "good", "title": "The Good Tale", "author": "Ann Author", "gutenberg_id": 11, "min_words": 2000},
-                     {"id": "wrongtitle", "title": "The Other Tale", "author": "Ann Author", "gutenberg_id": 12, "min_words": 2000},
-                     {"id": "wrongauthor", "title": "The Good Tale", "author": "Bob Zed", "gutenberg_id": 13, "min_words": 2000},
-                     {"id": "nomarkers", "title": "The Good Tale", "author": "Ann Author", "gutenberg_id": 14},
-                     {"id": "german", "title": "The Good Tale", "author": "Ann Author", "gutenberg_id": 15, "min_words": 2000},
-                     {"id": "short", "title": "The Good Tale", "author": "Ann Author", "gutenberg_id": 16, "min_words": 90000}]
+            books = [
+                {"id": "good", "title": "The Good Tale", "author": "Ann Author", "gutenberg_id": 11,
+                 "min_words": 2000, "text_start_pattern": "BEGIN GOOD STORY"},
+                {"id": "mapping-mismatch", "title": "A Tale", "author": "Ann Author", "gutenberg_id": 12,
+                 "min_words": 2000, "text_start_pattern": "BEGIN MISMATCH STORY"},
+                {"id": "missing-marker", "title": "A Tale", "author": "Ann Author", "gutenberg_id": 13,
+                 "min_words": 2000, "text_start_pattern": "THIS MARKER IS ABSENT"},
+                {"id": "missing-file", "title": "A Tale", "author": "Ann Author", "gutenberg_id": 14,
+                 "min_words": 2000, "text_start_pattern": "BEGIN MISSING FILE"},
+                {"id": "short", "title": "A Tale", "author": "Ann Author", "gutenberg_id": 15,
+                 "min_words": 90000, "text_start_pattern": "BEGIN SHORT STORY"},
+            ]
             (data / "books.json").write_text(json.dumps(books))
-            good = fake_gutenberg("The Good Tale", "Ann Author", 120, 1)
-            (raw / "pg11.txt").write_text(good)
-            (raw / "pg12.txt").write_text(good)
-            (raw / "pg13.txt").write_text(good)
-            (raw / "pg14.txt").write_text(good.replace("***", "---"))
-            (raw / "pg15.txt").write_text(fake_gutenberg("The Good Tale", "Ann Author", 120, 1, language="German"))
-            (raw / "pg16.txt").write_text(good)
+            long_story = " ".join(["lantern orchard river whisper copper meadow."] * 500)
+            short_story = "A few words only."
+            sources = {
+                "b001.txt": "Opening page\n\nBEGIN GOOD STORY\n\n" + long_story,
+                "b002.txt": "BEGIN MISMATCH STORY\n\n" + long_story,
+                "b003.txt": "BEGIN SHORT STORY\n\n" + short_story,
+            }
+            for filename, content in sources.items():
+                (raw / filename).write_text(content, encoding="utf-8")
+            mapping = {
+                "schema_version": 1,
+                "books": {
+                    "good": {"gutenberg_id": 11, "source_file": "b001.txt"},
+                    "mapping-mismatch": {"gutenberg_id": 999, "source_file": "b002.txt"},
+                    "missing-marker": {"gutenberg_id": 13, "source_file": "b002.txt"},
+                    "missing-file": {"gutenberg_id": 14, "source_file": "absent.txt"},
+                    "short": {"gutenberg_id": 15, "source_file": "b003.txt"},
+                },
+                "not_mapped": {},
+            }
+            (raw / "book_file_map.json").write_text(json.dumps(mapping), encoding="utf-8")
             out = self.run_tool(data, raw)
-            self.assertEqual(out.returncode, 0, out.stderr)
-            m = json.loads((data / "texts" / "manifest.json").read_text())
-            self.assertTrue(m["good"]["verified"])
-            self.assertEqual(m["good"]["header"]["title"], "The Good Tale")
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            manifest = json.loads((data / "texts" / "manifest.json").read_text())
+            self.assertTrue(manifest["good"]["verified"])
             self.assertTrue((data / "texts" / "good.txt").is_file())
-            for bad, phrase in (("wrongtitle", "title mismatch"), ("wrongauthor", "author mismatch"), ("nomarkers", "markers"),
-                                ("german", "language"), ("short", "words after cleaning")):
-                self.assertFalse(m[bad]["verified"], bad)
-                self.assertIn(phrase, " ".join(m[bad]["problems"]), bad)
-                self.assertFalse((data / "texts" / f"{bad}.txt").exists(), bad)
+            for book_id, phrase in (
+                ("mapping-mismatch", "Mapping mismatch"),
+                ("missing-marker", "text_start_pattern was not found"),
+                ("missing-file", "Local source file is missing"),
+                ("short", "requires at least"),
+            ):
+                self.assertFalse(manifest[book_id]["verified"], book_id)
+                self.assertIn(phrase, " ".join(manifest[book_id]["problems"]), book_id)
+                self.assertFalse((data / "texts" / f"{book_id}.txt").exists(), book_id)
 
 
 class JavaScriptTests(unittest.TestCase):
