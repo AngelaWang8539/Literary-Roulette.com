@@ -75,6 +75,18 @@ class FullTextCatalogueTests(Base):
         res = again.post("/api/book/reveal", json={"book_token": first["book_token"]}).get_json()
         self.assertTrue(res["ok"])
 
+    def test_history_passage_token_can_be_rehydrated_after_book_cache_eviction(self):
+        self.build_texts()
+        first = self.start()
+        cat = self.app.catalogue
+        cat.max_active_books = 1
+        other_id = "small" if cat.book_of(cat.passage_by_token(first["token"]))["id"] == "big" else "big"
+        cat.ensure_book_loaded(other_id)  # evicts the first full-text passage array
+        self.assertNotIn(cat.book_of(cat.passage_by_token(first["token"]))["id"], cat.passages_by_book)
+        next_passage = self.post("/api/passage/another", token=first["token"], book_token=first["book_token"])
+        self.assertTrue(next_passage["ok"])
+        self.assertNotEqual(next_passage["text"], first["text"])
+
     def test_reveal_is_metadata_only_and_never_restores_the_whole_cache(self):
         self.build_texts()
         first = self.start()
