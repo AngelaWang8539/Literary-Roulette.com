@@ -344,14 +344,25 @@ def create_app(test_config=None):
 
     @app.post("/api/event")
     def event():
+        body = request.get_json(silent=True) or {}
+        name = body.get("event") if isinstance(body, dict) else None
+        allowed = ("book_hidden", "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
+        if name not in allowed:
+            return fail("unknown_event", "That event is not accepted.")
+        # New clients identify the book directly. Logging a save/hide/awareness
+        # event must not rehydrate a full book merely to find its metadata.
+        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
+        if found_book:
+            language, cat, book = found_book
+            if name == "book_hidden":
+                session[session_key("revealed", language)] = None
+            analytics.log_event(db_path, name, book["id"], None, book.get("is_demo") is True)
+            return jsonify(ok=True, language=language)
+        # Backward compatibility for older clients.
         found = current_passage()
         if not found:
             return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
         language, cat, passage = found
-        name = (request.get_json(silent=True) or {}).get("event")
-        allowed = ("book_hidden", "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
-        if name not in allowed:
-            return fail("unknown_event", "That event is not accepted.")
         if name == "book_hidden":
             session[session_key("revealed", language)] = None
         record(cat, name, passage)
