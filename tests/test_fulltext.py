@@ -90,6 +90,16 @@ class FullTextCatalogueTests(Base):
         self.assertEqual(result["book"]["title"], "Title big")
         self.assertEqual(cat.passages_by_book, {})  # reveal did not read or split the text
 
+    def test_lazy_text_hash_is_checked_only_when_selected(self):
+        self.build_texts()
+        cat = self.app.catalogue
+        # Startup uses the verified manifest and file existence, not a full-corpus read.
+        self.assertIn("big", cat.book_ids)
+        (self.texts / "big.txt").write_text("tampered after startup", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after verification"):
+            cat.ensure_book_loaded("big")
+        self.assertNotIn("big", cat.book_ids)
+
     def test_memory_lru_evicts_passages_but_keeps_metadata(self):
         self.build_texts(MAX_LOADED_BOOKS_PER_LANGUAGE=1)
         cat = self.app.catalogue
