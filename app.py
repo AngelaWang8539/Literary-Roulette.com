@@ -203,13 +203,7 @@ def create_app(test_config=None):
         book_token = body.get("book_token")
         if not book_token:
             # Compatibility for older pages that send only the passage token.
-            # The current book token is small session state, not book text.
-            for language in catalogues:
-                book_token = session.get(session_key("current_book", language))
-                if book_token:
-                    found = find_passage(body.get("token"), book_token)
-                    if found:
-                        return found
+            book_token = session.get(session_key("current_book", active_language()))
         return find_passage(body.get("token"), book_token)
 
     def record(cat, event, passage):
@@ -307,10 +301,7 @@ def create_app(test_config=None):
         body = body if isinstance(body, dict) else {}
         book_token = body.get("book_token")
         if not book_token:
-            for language in catalogues:
-                book_token = session.get(session_key("current_book", language))
-                if book_token:
-                    break
+            book_token = session.get(session_key("current_book", active_language()))
         # Only inspect passages already resident in memory for analytics. Never
         # rehydrate a passage here: a reveal must not read/download full text.
         found = None
