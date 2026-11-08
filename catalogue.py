@@ -166,6 +166,8 @@ class Catalogue:
             if bid in self.text_books or self.books[bid].get("text_url"):
                 self._touch_active(bid)
             return bid
+        if existing and bid not in self.text_books:
+            return bid  # approved excerpt-only books do not need a full-text load
         if bid not in self.text_books:
             raise ValueError(f"No locally verified text is available for {bid}.")
         text = self._text_path(self.books[bid]).read_text(encoding="utf-8")
