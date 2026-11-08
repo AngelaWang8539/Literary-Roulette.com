@@ -156,22 +156,42 @@ def create_app(test_config=None):
     def fail(code, message, status=400):
         return jsonify(ok=False, code=code, message=message), status
 
-    def find_passage(token):
-        if not isinstance(token, str):
+    def find_book(book_token):
+        if not isinstance(book_token, str):
             return None
         for language, cat in catalogues.items():
+            book = gutendex.book_for_token(language, cat, book_token)
+            if book:
+                return language, cat, book
+        return None
+
+    def find_passage(token, book_token=None):
+        if not isinstance(token, str):
+            return None
+        if book_token:
+            found_book = find_book(book_token)
+            if not found_book:
+                return None
+            language, cat, book = found_book
+            try:
+                gutendex.ensure_book_loaded(language, cat, book)
+            except Exception as exc:
+                app.logger.warning("Could not load selected book for passage lookup: %s", exc)
+                return None
+            passage = cat.passage_by_token(token, book["id"])
+            return (language, cat, passage) if passage else None
+        # Backward compatibility for old links to a passage still resident in memory.
+        for language, cat in catalogues.items():
             passage = cat.passage_by_token(token)
-            if not passage:
-                gutendex.restore_cached_books(language, cat)
-                passage = cat.passage_by_token(token)
             if passage:
                 return language, cat, passage
         return None
 
     def current_passage():
         body = request.get_json(silent=True)
-        token = body.get("token") if isinstance(body, dict) else None
-        return find_passage(token)
+        if not isinstance(body, dict):
+            return None
+        return find_passage(body.get("token"), body.get("book_token"))
 
     def record(cat, event, passage):
         book = cat.book_of(passage)
@@ -231,9 +251,7 @@ def create_app(test_config=None):
         session[session_key("seen_b", language)] = []
         session[session_key("revealed", language)] = None
         try:
-            # Rehydrate previously downloaded texts before choosing a new title.
-            # This gives the app a local fallback if Gutenberg is temporarily down.
-            gutendex.restore_cached_books(language, cat)
+            # Only the selected title is loaded; cached text is read on demand.
             if gutendex.count(language):
                 passage, _restarted = gutendex.pick_passage(language, cat, rng(), set())
                 if passage is None:
@@ -242,7 +260,6 @@ def create_app(test_config=None):
                 passage = cat.pick_first(rng())
         except Exception as exc:
             app.logger.warning("On-demand Gutenberg selection failed; trying the verified local shelf: %s", exc)
-            gutendex.restore_cached_books(language, cat)
             if not cat.book_ids:
                 app.logger.exception("No local/cached fallback book is available")
                 return fail("gutenberg_fetch_failed", "The selected book could not be loaded and there is no saved book ready in this language yet. Please try again shortly.", 502)
@@ -267,6 +284,14 @@ def create_app(test_config=None):
 
     @app.post("/api/book/reveal")
     def reveal():
+        body = request.get_json(silent=True) or {}
+        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
+        if found_book:
+            language, cat, book = found_book
+            session[session_key("revealed", language)] = cat.book_token(book)
+            analytics.log_event(db_path, "book_revealed", book["id"], None, book.get("is_demo") is True)
+            return jsonify(ok=True, language=language, book=cat.book_payload(book))
+        # Backward compatibility for clients that still submit a passage token.
         found = current_passage()
         if not found:
             return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
@@ -296,7 +321,6 @@ def create_app(test_config=None):
                 nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
         except Exception as exc:
             app.logger.warning("On-demand Gutenberg spin failed; trying the verified local shelf: %s", exc)
-            gutendex.restore_cached_books(language, cat)
             bid, restarted = cat.pick_other_book(
                 passage["book_id"], set(seen("seen_b", language)), rng()
             )
@@ -335,8 +359,19 @@ def create_app(test_config=None):
 
     @app.get("/go/<kind>/<token>")
     def go(kind, token):
+        if kind not in LINK_KINDS:
+            return render_template("about.html", site=app.config["SITE"], missing_link=True, language=active_language()), 404
+        found_book = find_book(token)
+        if found_book:
+            language, cat, book = found_book
+            url = cat.links_for(book).get(kind)
+            if not url:
+                return render_template("about.html", site=app.config["SITE"], missing_link=True, language=language), 404
+            analytics.log_event(db_path, f"{kind}_link_clicked", book["id"], None, book.get("is_demo") is True)
+            return redirect(url, 302)
+        # Accept older passage-token links retained by earlier browser sessions.
         found = find_passage(token)
-        if not found or kind not in LINK_KINDS:
+        if not found:
             return render_template("about.html", site=app.config["SITE"], missing_link=True, language=active_language()), 404
         language, cat, passage = found
         url = cat.links_for(cat.book_of(passage)).get(kind)
