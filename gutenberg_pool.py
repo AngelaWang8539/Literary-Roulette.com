@@ -47,11 +47,13 @@ def _rank(records):
 
 class GutendexPool:
     def __init__(self, catalog_path, cache_dir, max_cache_files=8,
-                 max_cache_bytes=64 * 1024 * 1024, cache_ttl_seconds=14 * 24 * 3600):
+                 max_cache_bytes=64 * 1024 * 1024, cache_ttl_seconds=14 * 24 * 3600,
+                 max_download_bytes=32 * 1024 * 1024):
         self.catalog_path, self.cache_dir = Path(catalog_path), Path(cache_dir)
         self.max_cache_files = max(1, int(max_cache_files))
         self.max_cache_bytes = max(1, int(max_cache_bytes))
         self.cache_ttl_seconds = max(60, int(cache_ttl_seconds))
+        self.max_download_bytes = max(1024 * 1024, int(max_download_bytes))
         self.snapshot = {}
         self.records = {code: [] for code in LANGUAGE_LABELS}
         self.by_gid = {code: {} for code in LANGUAGE_LABELS}
@@ -249,7 +251,18 @@ class GutendexPool:
                 try:
                     with urllib.request.urlopen(req, timeout=60) as response:
                         content_type = response.headers.get_content_type().lower()
-                        raw = response.read()
+                        length_header = response.headers.get("Content-Length")
+                        if length_header and int(length_header) > self.max_download_bytes:
+                            raise RuntimeError(
+                                f"Project Gutenberg eBook #{gid} exceeds the "
+                                f"{self.max_download_bytes // (1024 * 1024)} MiB per-book text limit."
+                            )
+                        raw = response.read(self.max_download_bytes + 1)
+                    if len(raw) > self.max_download_bytes:
+                        raise RuntimeError(
+                            f"Project Gutenberg eBook #{gid} exceeds the "
+                            f"{self.max_download_bytes // (1024 * 1024)} MiB per-book text limit."
+                        )
                     if content_type in ("text/html", "application/json", "application/xhtml+xml"):
                         raise RuntimeError(f"Project Gutenberg eBook #{gid} returned {content_type}, not plain text.")
                     probe = raw[:512].lstrip().lower()
