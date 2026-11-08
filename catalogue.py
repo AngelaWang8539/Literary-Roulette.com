@@ -95,7 +95,7 @@ class Catalogue:
 
         for b in books:
             if isinstance(b, dict) and isinstance(b.get("id"), str) and (b.get("gutenberg_id") or b.get("text_file")):
-                reason = self._text_problem(b)
+                reason = self._text_problem(b, verify_hash=not self.lazy_text)
                 if reason:
                     self.unavailable[b["id"]] = reason
                 else:
@@ -183,7 +183,22 @@ class Catalogue:
         if bid not in self.text_books:
             return bool(self.passages_by_book.get(bid))
         book = self.books[bid]
-        text = self._text_path(book).read_text(encoding="utf-8")
+        path = self._text_path(book)
+        try:
+            raw_text = path.read_bytes()
+        except OSError as exc:
+            self.unavailable[bid] = f"verified text file {path.name} could not be read: {exc}"
+            if bid in self.book_ids:
+                self.book_ids.remove(bid)
+            raise ValueError(self.unavailable[bid]) from exc
+        manifest_entry = self.manifest.get(bid) or {}
+        if hashlib.sha256(raw_text).hexdigest() != manifest_entry.get("text_sha256"):
+            self.unavailable[bid] = "cleaned text changed after verification; rerun the language importer"
+            if bid in self.book_ids:
+                self.book_ids.remove(bid)
+            raise ValueError(self.unavailable[bid])
+        text = raw_text.decode("utf-8")
+        del raw_text
         split = _split_chinese(text) if self.language == "zh" else textproc.split_passages(text)
         if not split:
             raise ValueError(f"Verified text for {book.get('title', bid)} did not yield readable passages.")
@@ -238,7 +253,7 @@ class Catalogue:
     def _text_path(self, book):
         return self.texts_dir / _safe_text_name(book)
 
-    def _text_problem(self, book):
+    def _text_problem(self, book, verify_hash=True):
         if not self.texts_dir:
             return "no text folder configured"
         entry = self.manifest.get(book["id"])
@@ -249,7 +264,7 @@ class Catalogue:
         path = self._text_path(book)
         if not path.is_file():
             return f"cleaned text file {path.name} is missing"
-        if hashlib.sha256(path.read_bytes()).hexdigest() != entry.get("text_sha256"):
+        if verify_hash and hashlib.sha256(path.read_bytes()).hexdigest() != entry.get("text_sha256"):
             return "cleaned text changed after verification; rerun the language importer"
         return None
 
