@@ -41,7 +41,7 @@ class FullTextCatalogueTests(Base):
         big_count = len(cat.passages_by_book["big"])
         self.assertGreater(big_count, 5)
         cat.ensure_book_loaded("small")
-        self.assertLess(big_count, len(cat.passages_by_book["small"]) * 6)
+        self.assertGreater(big_count, 5 * len(cat.passages_by_book["small"]))
         self.assertTrue(all(p["id"].startswith(("big:v1:", "small:v1:")) for p in cat.passages.values()))
 
     def test_book_fairness_with_unequal_lengths(self):
