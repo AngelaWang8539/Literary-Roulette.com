@@ -8,7 +8,11 @@ Read a passage first. Reveal the book only when you choose to. This is a separat
 
 - The agreed **40-book English catalogue**: 25 familiar-classic candidates and 15 discovery candidates.
 - Full-text ingestion and local storage. Once imported and reviewed, full texts are kept in `data/texts/`; a normal spin does not contact Project Gutenberg.
-- Passages generated from the stored text, targeting roughly 80–150 words while respecting paragraphs and sentences where possible.
+- Passages generated from verified stored text only when a title is selected; the server keeps at most **2 generated books per language** in memory.
+- On-demand Gutenberg text is cached separately under `instance/gutenberg_cache/`: at most **8 files / 64 MiB total**, expired after **14 days**, with a **32 MiB per-book download ceiling**.
+- Book reveal and saved-book links use stable book tokens and read metadata only; they do not require a full-text cache entry.
+- My History stores the actual passage snapshot and keeps the newest **80 entries**. Evicting a full book never removes a History passage.
+- Passages generated from verified stored text target roughly 80–150 words while respecting paragraphs and sentences where possible.
 - Three independent actions: another passage from this book, reveal this book, and spin another book.
 - My History with search, revealed/unrevealed filters, reopen/reveal/remove actions, and clear-history confirmation.
 - My Saved Books.
@@ -83,6 +87,7 @@ A visible notice identifies fictional demo books. Do not use demo records as evi
 - `data/texts_raw/`: downloaded source text cache used by the importer.
 - `data/texts/`: cleaned, complete local texts plus `manifest.json` verification details.
 - `instance/analytics.db`: aggregate product event counts. It does not store a visitor's full browsing history or raw IP address.
+- `instance/gutenberg_cache/`: bounded temporary full-text cache for books fetched from the Gutenberg metadata catalogue. It can be safely pruned; the metadata snapshot and curated source texts are separate.
 - Browser IndexedDB: reader's history, saved books, and personal uploads. These stay in the current browser and do not sync across devices.
 
 Do not put API secrets or personal information in the public catalogue. A local full-text library should not automatically be included in a public GitHub repository; decide what to distribute and how to meet the source licence obligations before publishing the repository.
@@ -92,7 +97,7 @@ Do not put API secrets or personal information in the public catalogue. A local 
 - **Another passage from this book**: chooses a different passage from the same title where one exists.
 - **Reveal this book**: returns the current book details without changing the passage.
 - **Spin another book**: selects a different title and returns to anonymous reading.
-- **My History**: search passage words, filter by reveal status, reopen an exact passage, reveal it deliberately, remove an entry, or clear history.
+- **My History**: search passage words, filter by reveal status, reopen an exact passage, reveal it deliberately, remove an entry, or clear history. Only the newest 80 passage snapshots are retained in this browser; each retained entry keeps its passage text even after the server evicts the full book.
 - **My Saved Books**: save an identified book and find it later.
 - **Upload my book**: process `.txt` and `.epub` locally in the browser (15 MB limit). DRM-protected files are not circumvented. Uploaded books stay private to this browser.
 
