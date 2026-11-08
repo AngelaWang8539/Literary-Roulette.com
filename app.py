@@ -386,17 +386,33 @@ def create_app(test_config=None):
 
     @app.post("/api/event")
     def event():
-        found = current_passage()
-        if not found:
-            return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-        language, cat, passage = found
-        name = (request.get_json(silent=True) or {}).get("event")
+        body = request.get_json(silent=True)
+        body = body if isinstance(body, dict) else {}
+        name = body.get("event")
         allowed = ("book_hidden", "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
         if name not in allowed:
             return fail("unknown_event", "That event is not accepted.")
+
+        book_token = body.get("book_token")
+        resolved = gutendex.resolve_book_token(book_token, catalogues) if book_token else None
+        if resolved:
+            # Analytics and reveal-state updates are book-level operations. Do
+            # not fetch a full text just because another user evicted this book.
+            language, cat, book = resolved
+            passage = cat.passage_by_token(body.get("token")) if body.get("token") else None
+        else:
+            found = current_passage()
+            if not found:
+                return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
+            language, cat, passage = found
+            book = cat.book_of(passage)
+
         if name == "book_hidden":
             session[session_key("revealed", language)] = None
-        record(cat, name, passage)
+        if passage:
+            record(cat, name, passage)
+        else:
+            analytics.log_event(db_path, name, book["id"], None, book.get("is_demo") is True)
         return jsonify(ok=True, language=language)
 
     @app.get("/go/<kind>/<token>")
