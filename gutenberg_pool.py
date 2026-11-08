@@ -55,6 +55,7 @@ class GutendexPool:
         self.is_partial_snapshot = False
         self.partial_reason = None
         self._lock = threading.Lock()
+        self._book_token_indexes = {}
         self.max_cache_books = 8
         self.max_cache_bytes = 64 * 1024 * 1024
         self.cache_max_age_seconds = 14 * 24 * 60 * 60
@@ -133,11 +134,11 @@ class GutendexPool:
                         missing.append({"language": language, "title": book.get("title"), "gutenberg_id": int(gid)})
         return missing
 
-    def _book_record(self, record, language):
+    def _book_record(self, record, language, require_text_url=True):
         gid = int(record["id"])
         formats = record.get("formats") if isinstance(record.get("formats"), dict) else {}
         text_url = _plain_text_url(formats)
-        if not text_url: raise RuntimeError(f"Gutenberg eBook #{gid} has no trusted plain-text URL.")
+        if require_text_url and not text_url: raise RuntimeError(f"Gutenberg eBook #{gid} has no trusted plain-text URL.")
         authors = [a.get("name", "") for a in (record.get("authors") or []) if isinstance(a, dict) and a.get("name")]
         author = ", ".join(authors) or "Author not listed"
         genres = record.get("bookshelves") or record.get("subjects") or []
@@ -175,6 +176,8 @@ class GutendexPool:
             if cache.is_file():
                 os.utime(cache, None)
                 return cache.read_text(encoding="utf-8")
+            if not book.get("text_url"):
+                raise RuntimeError(f"Project Gutenberg eBook #{gid} has no trusted plain-text download URL.")
             req = urllib.request.Request(book["text_url"], headers={
                 "User-Agent": "LiteraryRoulette/0.5 (on-demand text reader)",
                 "Accept-Encoding": "identity",
@@ -274,15 +277,23 @@ class GutendexPool:
                 except OSError: pass
 
     def book_for_token(self, language, cat, token):
-        """Resolve a book from catalogue metadata only; never loads its full text."""
-        for book in cat.books.values():
-            if cat.book_token(book) == token:
+        """Resolve a book from metadata only; never loads its full text."""
+        bid = cat._b_tokens.get(token)
+        if bid:
+            book = cat.books.get(bid)
+            if book:
                 return book
-        for record in self.records.get(language, []):
-            bid = f"pg-{language}-{int(record['id'])}"
-            if cat.token("b", bid) == token:
-                return self._book_record(record, language)
-        return None
+        # Build this language's token index once per metadata snapshot. A later
+        # refresh constructs a new pool and therefore a fresh index.
+        index = self._book_token_indexes.get(language)
+        if index is None:
+            index = {}
+            for record in self.records.get(language, []):
+                book_id = f"pg-{language}-{int(record['id'])}"
+                index[cat.token("b", book_id)] = record
+            self._book_token_indexes[language] = index
+        record = index.get(token)
+        return self._book_record(record, language, require_text_url=False) if record else None
 
     def ensure_book_loaded(self, language, cat, book):
         """Load only the requested title into the catalogue's two-book memory LRU."""
