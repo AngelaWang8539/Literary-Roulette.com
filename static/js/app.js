@@ -133,7 +133,7 @@ function renderBook(b) {
   ui.credit.replaceChildren();
   if (b.source_credit) {
     const a = el("a", "", b.source_credit.label); a.href = b.source_credit.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-    ui.credit.append(a, " \u2013 " + b.source_credit.note);
+    ui.credit.append(a, " \u2013 ", el("span", "", b.source_credit.note));
   }
   ui.credit.hidden = !b.source_credit;
   ui.contentNote.textContent = b.content_note ? "Content note: " + b.content_note : ""; ui.contentNote.hidden = !b.content_note;
