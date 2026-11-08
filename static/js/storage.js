@@ -1,6 +1,7 @@
 // Everything the reader keeps in THIS browser: history, saved books, uploaded books.
 // It uses IndexedDB. Nothing here is sent to the server and nothing syncs between devices.
 const STORES = ["history", "saved", "uploads"];
+export const HISTORY_LIMIT = 80;
 
 export function idbAdapter(factory = globalThis.indexedDB) {
   const opened = new Promise((resolve, reject) => {
@@ -45,14 +46,20 @@ let counter = 0;
 const defaultId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${++counter}-${Math.random().toString(36).slice(2)}`);
 
 export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = {}) {
+  const trimHistory = async () => {
+    const all = (await db.getAll("history")).sort((a, b) => b.ts - a.ts || (a.id < b.id ? 1 : -1));
+    await Promise.all(all.slice(HISTORY_LIMIT).map((entry) => db.remove("history", entry.id)));
+  };
   const lib = {
     // ---- reading history ----
     async addHistory({ source, bookKey, passageKey, text }) {
       const entry = { id: uid(), ts: now(), source, bookKey, passageKey, text, revealed: false, title: null, author: null };
       await db.put("history", entry);
+      await trimHistory();
       return entry;
     },
     async listHistory({ query = "", status = "all" } = {}) {
+      await trimHistory(); // also removes overflow left by older app versions
       const q = query.trim().toLowerCase();
       const all = (await db.getAll("history")).sort((a, b) => b.ts - a.ts || (a.id < b.id ? 1 : -1));
       return all.filter((e) => {
