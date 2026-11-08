@@ -162,14 +162,23 @@ class GutendexPool:
             return
         now = time.time()
         candidates = []
-        for path in self.cache_dir.rglob("pg*.txt"):
-            if not re.fullmatch(r"pg\d+\.txt", path.name):
+        for path in self.cache_dir.rglob("*"):
+            # Clean abandoned atomic-write leftovers, but leave recent temporary
+            # files alone because another worker may still be writing one.
+            if path.is_file() and path.name.startswith("pg") and path.name.endswith(".txt.tmp"):
+                try:
+                    if now - path.stat().st_mtime > 3600:
+                        path.unlink()
+                except OSError:
+                    pass
+                continue
+            if not path.is_file() or not re.fullmatch(r"pg\d+\.txt", path.name):
                 continue
             try:
                 stat = path.stat()
             except OSError:
                 continue
-            if now - stat.st_mtime > self.cache_ttl_seconds:
+            if now - stat.st_mtime > self.cache_ttl_seconds or stat.st_size > self.max_cache_bytes:
                 try:
                     path.unlink()
                 except OSError:
@@ -180,9 +189,7 @@ class GutendexPool:
         total_bytes = 0
         kept = 0
         for path, _mtime, size in candidates:
-            # Retain at least the newest text even if it alone exceeds the cap;
-            # every additional file must fit both limits.
-            within_bytes = kept == 0 or total_bytes + size <= self.max_cache_bytes
+            within_bytes = total_bytes + size <= self.max_cache_bytes
             if kept < self.max_cache_files and within_bytes:
                 kept += 1
                 total_bytes += size
