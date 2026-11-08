@@ -317,7 +317,14 @@ async function renderSaved() {
     if (b.isUpload) li.append(el("p", "meta", "Your upload. Stored only in this browser."));
     if (b.links?.length) {
       const ul = el("ul", "links");
-      for (const l of b.links) { const x = el("li"), a = el("a", "btn link"); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab")); x.append(a); ul.append(x); }
+      for (const l of b.links) {
+        const x = el("li"), a = el("a", "btn link");
+        // Upgrade older saved catalogue links from passage tokens to stable book tokens.
+        a.href = b.source === "catalogue" && b.bookKey ? `/go/${l.kind}/${b.bookKey}` : l.href;
+        a.target = "_blank"; a.rel = "noopener noreferrer";
+        a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab"));
+        x.append(a); ul.append(x);
+      }
       li.append(ul);
     }
     const rm = el("button", "btn quiet", "Remove from saved"); rm.type = "button"; rm.dataset.act = "remove"; li.append(rm);
