@@ -303,26 +303,38 @@ def create_app(test_config=None):
 
     @app.post("/api/book/spin")
     def spin():
-        found = current_passage()
-        if not found:
-            return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-        language, cat, passage = found
-        record(cat, "another_book_requested", passage)
+        body = request.get_json(silent=True) or {}
+        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
+        if found_book:
+            language, cat, current_book = found_book
+            current_book_id = current_book["id"]
+            analytics.log_event(db_path, "another_book_requested", current_book_id, None,
+                                current_book.get("is_demo") is True)
+        else:
+            # Backward compatibility for older clients without a stable book token.
+            found = current_passage()
+            if not found:
+                return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
+            language, cat, passage = found
+            current_book = cat.book_of(passage)
+            current_book_id = current_book["id"]
+            record(cat, "another_book_requested", passage)
+
         extra = {}
         try:
             if gutendex.count(language):
                 nxt, restarted = gutendex.pick_passage(
-                    language, cat, rng(), set(seen("seen_b", language)), current_book_id=passage["book_id"]
+                    language, cat, rng(), set(seen("seen_b", language)), current_book_id=current_book_id
                 )
             else:
                 bid, restarted = cat.pick_other_book(
-                    passage["book_id"], set(seen("seen_b", language)), rng()
+                    current_book_id, set(seen("seen_b", language)), rng()
                 )
                 nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
         except Exception as exc:
             app.logger.warning("On-demand Gutenberg spin failed; trying the verified local shelf: %s", exc)
             bid, restarted = cat.pick_other_book(
-                passage["book_id"], set(seen("seen_b", language)), rng()
+                current_book_id, set(seen("seen_b", language)), rng()
             )
             nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
             if nxt is not None:
