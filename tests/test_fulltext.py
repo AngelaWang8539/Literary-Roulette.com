@@ -32,11 +32,16 @@ class FullTextCatalogueTests(Base):
         books = [text_book("big", 1, "Title big"), text_book("small", 2, "Title small", "discovery")]
         return self.build(books=books, passages=[], TEXTS_DIR=self.texts, MANIFEST=None, INSTANCE_DIR=Path(self.tmp.name), **cfg)
 
-    def test_passages_come_from_stored_text_only(self):
+    def test_passages_are_generated_only_when_a_book_is_selected(self):
         self.build_texts()
         cat = self.app.catalogue
         self.assertEqual(set(cat.book_ids), {"big", "small"})
-        self.assertGreater(len(cat.passages_by_book["big"]), 5 * len(cat.passages_by_book["small"]))
+        self.assertEqual(cat.passages_by_book, {})  # metadata is ready; no full text is resident
+        cat.ensure_book_loaded("big")
+        big_count = len(cat.passages_by_book["big"])
+        self.assertGreater(big_count, 5)
+        cat.ensure_book_loaded("small")
+        self.assertGreater(big_count, 5 * len(cat.passages_by_book["small"]))
         self.assertTrue(all(p["id"].startswith(("big:v1:", "small:v1:")) for p in cat.passages.values()))
 
     def test_book_fairness_with_unequal_lengths(self):
@@ -58,10 +63,10 @@ class FullTextCatalogueTests(Base):
         redirect = self.client.get(rev["links"][0]["href"])
         self.assertEqual(redirect.status_code, 302)
         self.assertTrue(redirect.headers["Location"].startswith("https://www.gutenberg.org/ebooks/"))
-        nxt = self.post("/api/passage/another", token=first["token"])
+        nxt = self.post("/api/passage/another", token=first["token"], book_token=first["book_token"])
         self.assertNotEqual(nxt["text"], first["text"])
         self.assertEqual(nxt["book_token"], first["book_token"])
-        spun = self.post("/api/book/spin", token=nxt["token"])
+        spun = self.post("/api/book/spin", token=nxt["token"], book_token=nxt["book_token"])
         self.assertNotEqual(spun["book_token"], first["book_token"])
         self.assertNotIn("book", spun)
 
@@ -70,8 +75,48 @@ class FullTextCatalogueTests(Base):
         first = self.start()
         from app import create_app
         again = create_app(self.app.config.copy()).test_client()
-        res = again.post("/api/book/reveal", json={"token": first["token"]}).get_json()
+        res = again.post("/api/book/reveal", json={
+            "token": first["token"], "book_token": first["book_token"]
+        }).get_json()
         self.assertTrue(res["ok"])
+
+    def test_reveal_is_metadata_only_even_when_text_is_not_loaded(self):
+        self.build_texts()
+        cat = self.app.catalogue
+        book = cat.books["big"]
+        self.assertEqual(cat.passages_by_book, {})
+        result = self.post("/api/book/reveal", book_token=cat.book_token(book))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["book"]["title"], "Title big")
+        self.assertEqual(cat.passages_by_book, {})  # reveal did not read or split the text
+
+    def test_lazy_text_hash_is_checked_only_when_selected(self):
+        self.build_texts()
+        cat = self.app.catalogue
+        # Startup uses the verified manifest and file existence, not a full-corpus read.
+        self.assertIn("big", cat.book_ids)
+        (self.texts / "big.txt").write_text("tampered after startup", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after verification"):
+            cat.ensure_book_loaded("big")
+        self.assertNotIn("big", cat.book_ids)
+
+    def test_memory_lru_evicts_passages_but_keeps_metadata(self):
+        self.build_texts(MAX_LOADED_BOOKS_PER_LANGUAGE=1)
+        cat = self.app.catalogue
+        cat.ensure_book_loaded("big")
+        old_token = cat.passage_token(cat.passages_by_book["big"][0])
+        cat.ensure_book_loaded("small")
+        self.assertNotIn("big", cat.passages_by_book)
+        self.assertIn("big", cat.books)
+        self.assertIn("big", cat.book_ids)
+        self.assertIsNone(cat.passage_by_token(old_token))
+        cat.ensure_book_loaded("big")
+        self.assertEqual(cat.passage_token(cat.passages_by_book["big"][0]), old_token)
+        # Saved-book links use the stable book token, not an evictable passage token.
+        stable_link = f"/go/read/{cat.book_token(cat.books['big'])}"
+        response = self.client.get(stable_link)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].startswith("https://www.gutenberg.org/ebooks/"))
 
     def test_unverified_or_tampered_text_is_excluded_and_explained(self):
         self.build_texts()
