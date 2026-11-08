@@ -189,16 +189,15 @@ class IngestToolTests(unittest.TestCase):
                                "--source-dir", str(raw_dir), *extra], capture_output=True, text=True, cwd=ROOT)
 
     def test_uncertain_story_start_is_not_marked_verified(self):
-        # A valid Gutenberg wrapper and matching metadata are not enough if the
-        # importer cannot identify where the actual work begins.
-        from tools.ingest_gutenberg import verify
-        raw = fake_gutenberg("The Good Tale", "Ann Author", paragraphs=120, seed=3)
-        book = {"title": "The Good Tale", "author": "Ann Author", "min_words": 2000,
+        # The current importer accepts only already-cleaned local files and
+        # refuses to continue if the configured narrative marker is absent.
+        from tools.ingest_gutenberg import prepare_already_cleaned_text
+        raw = "Opening page\\n\\nA paragraph that is not the requested story start."
+        book = {"title": "The Good Tale", "min_words": 2000,
                 "text_start_pattern": "THIS PHRASE DOES NOT EXIST IN THE SOURCE"}
-        problems, cleaned, info = verify(raw, book)
-        self.assertIsNotNone(cleaned)
+        cleaned, problems = prepare_already_cleaned_text(raw, book)
+        self.assertEqual(cleaned, "")
         self.assertTrue(any("text_start_pattern was not found" in p for p in problems))
-        self.assertTrue(any("Story start not located with confidence" in w for w in info["warnings"]))
 
     def test_verifies_good_files_and_rejects_bad_ones(self):
         # The current importer consumes already-cleaned local text plus an
