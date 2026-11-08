@@ -44,12 +44,25 @@ export function memoryAdapter() {
 let counter = 0;
 const defaultId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${++counter}-${Math.random().toString(36).slice(2)}`);
 
-export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = {}) {
+export function createLibrary(db, { now = () => Date.now(), uid = defaultId, historyLimit = 80 } = {}) {
+  const HISTORY_LIMIT = Math.max(1, Number(historyLimit) || 80);
+
+  async function trimHistory() {
+    const all = (await db.getAll("history"))
+      .sort((a, b) => b.ts - a.ts || (a.id < b.id ? 1 : -1));
+    await Promise.all(all.slice(HISTORY_LIMIT).map((entry) => db.remove("history", entry.id)));
+    return all.slice(0, HISTORY_LIMIT);
+  }
+
   const lib = {
     // ---- reading history ----
+    async pruneHistory() {
+      return trimHistory();
+    },
     async addHistory({ source, bookKey, passageKey, text }) {
       const entry = { id: uid(), ts: now(), source, bookKey, passageKey, text, revealed: false, title: null, author: null };
       await db.put("history", entry);
+      await trimHistory();
       return entry;
     },
     async listHistory({ query = "", status = "all" } = {}) {
