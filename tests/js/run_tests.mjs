@@ -65,6 +65,19 @@ await test("history: add, persist in the same store, search, filter, reveal, rem
   assert.equal((await lib.listHistory()).length, 0);
 });
 
+await test("history: cap is 80 and retained entries keep their complete passage text", async () => {
+  const lib = createLibrary(memoryAdapter(), { historyLimit: 80, now: (() => { let t = 5000; return () => t++; })() });
+  for (let i = 0; i < 100; i++) {
+    await lib.addHistory({ source: "catalogue", bookKey: "bk", passageKey: "p" + i, text: "Full passage text " + i });
+  }
+  const entries = await lib.listHistory();
+  assert.equal(entries.length, 80);
+  assert.equal(entries[0].passageKey, "p99");
+  assert.equal(entries.at(-1).passageKey, "p20");
+  assert.equal(entries[0].text, "Full passage text 99");
+  assert.equal(entries.at(-1).text, "Full passage text 20");
+});
+
 await test("saved books: save, list, check, remove", async () => {
   const lib = createLibrary(memoryAdapter());
   await lib.saveBook({ source: "catalogue", bookKey: "bk1", title: "T", author: "A", links: [] });
