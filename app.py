@@ -191,13 +191,9 @@ def create_app(test_config=None):
                 if passage:
                     return language, cat, passage
 
-        # Legacy clients may send only passage tokens. Keep a very small,
-        # best-effort fallback for the newest text cache file.
-        for language, cat in catalogues.items():
-            gutendex.restore_cached_books(language, cat)
-            passage = cat.passage_by_token(token)
-            if passage:
-                return language, cat, passage
+        # Do not guess which book a stale passage token belongs to by scanning
+        # cache files. New clients supply the stable book token; old same-session
+        # clients are upgraded by current_passage() above.
         return None
 
     def current_passage():
@@ -310,6 +306,11 @@ def create_app(test_config=None):
         body = request.get_json(silent=True)
         body = body if isinstance(body, dict) else {}
         book_token = body.get("book_token")
+        if not book_token:
+            for language in catalogues:
+                book_token = session.get(session_key("current_book", language))
+                if book_token:
+                    break
         # Only inspect passages already resident in memory for analytics. Never
         # rehydrate a passage here: a reveal must not read/download full text.
         found = None
