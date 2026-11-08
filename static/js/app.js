@@ -111,7 +111,7 @@ function renderBook(b) {
     ui.popularity.append(el("span", "popularity-label", b.popularity.label));
     if (b.popularity.detail) ui.popularity.append(el("small", "popularity-detail", b.popularity.detail));
     ui.popularity.hidden = false;
-    ui.popularity.title = "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
+    ui.popularity.title = b.popularity.note || "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
     ui.popularity.setAttribute("aria-label", `${b.popularity.label}. ${b.popularity.detail || ""}`.trim());
   } else {
     ui.popularity.hidden = true;

@@ -133,3 +133,25 @@ class AnalyticsWriterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PopularityLanguageTests(unittest.TestCase):
+    def test_ranking_text_follows_the_book_language(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = [{"id": 300000 + i, "download_count": 1000 - i,
+                     "formats": {"text/plain": f"https://www.gutenberg.org/cache/epub/{300000+i}/a.txt"}} for i in range(500)]
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"filters": {"max_pages": None}, "languages": {"en": rows, "fr": rows, "zh": rows}}))
+            pool = gutenberg_pool.GutendexPool(path, Path(tmp) / "cache")
+            rec = pool.by_gid["en"][300250]
+            en = pool.popularity_payload(rec, "en")
+            fr = pool.popularity_payload(rec, "fr")
+            zh = pool.popularity_payload(rec, "zh")
+            self.assertIn("A new discovery", en["label"])
+            self.assertIn("Une découverte", fr["label"]); self.assertIn("titres français", fr["detail"])
+            self.assertIn("新发现", zh["label"]); self.assertIn("中文书籍", zh["detail"])
+            for payload in (en, fr, zh):
+                self.assertTrue(payload["note"])
+            top = pool.popularity_payload(pool.by_gid["en"][300000], "fr")
+            self.assertEqual(top["tier"], "jackpot"); self.assertIn("Jackpot", top["label"])

@@ -45,6 +45,43 @@ def _rank(records):
         record["popularity_top_percent"] = max(1, min(100, math.ceil(rank * 100 / total))) if total else 100
 
 
+def _popularity_text(language, tier, rank, total, downloads):
+    """Reader-facing ranking text in the reader's language (en, fr, zh)."""
+    if language == "fr":
+        n = lambda v: f"{v:,}".replace(",", "\u202f")
+        label = {
+            "jackpot": "Jackpot ! Un favori du top 1 % de Project Gutenberg !",
+            "lucky": "Belle trouvaille ! Parmi les 10 % les plus téléchargés !",
+            "hidden-gem": "Perle rare ! Parmi les 10 % les moins téléchargés — envie d’explorer ?",
+            "discovery": f"Une découverte · n° {n(rank)} par téléchargements sur les 30 derniers jours",
+        }[tier]
+        detail = (f"Rang n° {n(rank)} sur {n(total)} titres français indexés · "
+                  f"environ {n(downloads)} téléchargements sur les 30 derniers jours")
+        note = ("D’après les téléchargements approximatifs de Project Gutenberg sur les 30 derniers jours ; "
+                "il s’agit de popularité, pas de qualité littéraire.")
+    elif language == "zh":
+        label = {
+            "jackpot": "头奖！Project Gutenberg 前 1% 的热门读物！",
+            "lucky": "幸运发现！下载量位列前 10%！",
+            "hidden-gem": "遗珠！下载量最低的 10% 之一——想探索一下吗？",
+            "discovery": f"新发现 · 近 30 天下载量排名第 {rank:,} 位",
+        }[tier]
+        detail = f"在已收录的 {total:,} 种中文书籍中排名第 {rank:,} · 近 30 天约 {downloads:,} 次下载"
+        note = "依据 Project Gutenberg 近 30 天的大致下载量；这代表受欢迎程度，而非文学价值。"
+    else:
+        label = {
+            "jackpot": "Jackpot! A top 1% Gutenberg favourite!",
+            "lucky": "Lucky find! Top 10% most downloaded!",
+            "hidden-gem": "Hidden gem alert! Among the least-downloaded 10% — would you like to explore?",
+            "discovery": f"A new discovery · ranked #{rank:,} by downloads in the last 30 days",
+        }[tier]
+        name = LANGUAGE_LABELS.get(language, language)
+        detail = f"Rank #{rank:,} of {total:,} indexed {name} titles · {downloads:,} approximate downloads in the last 30 days"
+        note = ("Based on Project Gutenberg's approximate downloads in the previous 30 days; "
+                "this is popularity, not literary quality.")
+    return label, detail, note
+
+
 class GutendexPool:
     def __init__(self, catalog_path, cache_dir):
         self.catalog_path, self.cache_dir = Path(catalog_path), Path(cache_dir)
@@ -94,25 +131,20 @@ class GutendexPool:
         rank = int(record.get("popularity_rank") or 0)
         total = int(record.get("popularity_total") or self.count(language))
         downloads = int(record.get("download_count") or 0)
-        language_name = LANGUAGE_LABELS.get(language, language)
-
         # Extreme labels are only meaningful with a reasonably sized collection.
         if total >= 100 and pct <= 1:
             tier = "jackpot"
-            label = "Jackpot! A top 1% Gutenberg favourite!"
         elif total >= 100 and pct <= 10:
             tier = "lucky"
-            label = "Lucky find! Top 10% most downloaded!"
         elif total >= 100 and pct >= 91:
             tier = "hidden-gem"
-            label = "Hidden gem alert! Among the least-downloaded 10% — would you like to explore?"
         else:
             tier = "discovery"
-            label = f"A new discovery · ranked #{rank:,} by downloads in the last 30 days"
+        label, detail, note = _popularity_text(language, tier, rank, total, downloads)
 
         return {
             "tier": tier, "label": label,
-            "detail": f"Rank #{rank:,} of {total:,} indexed {language_name} titles · {downloads:,} approximate downloads in the last 30 days",
+            "detail": detail, "note": note,
             "rank": rank, "total": total, "downloads_30d": downloads, "top_percent": pct,
             "snapshot_date": self.snapshot.get("generated_at"),
             "source_url": f"https://www.gutenberg.org/ebooks/{record['id']}",
