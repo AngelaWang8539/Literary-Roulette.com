@@ -71,9 +71,9 @@ class GutendexPool:
                 self.records[code] = rows
                 self.by_gid[code] = {int(r["id"]): r for r in rows}
         except FileNotFoundError:
-            self.load_error = "Gutendex metadata has not been synced yet."
+            self.load_error = "Project Gutenberg metadata has not been synced yet."
         except (OSError, ValueError, TypeError) as exc:
-            self.load_error = f"Gutendex metadata could not be read: {exc}"
+            self.load_error = f"Project Gutenberg metadata could not be read: {exc}"
 
     def count(self, language):
         return len(self.records.get(language, []))
@@ -101,11 +101,11 @@ class GutendexPool:
             label = "Hidden gem alert! Among the least-downloaded 10% — would you like to explore?"
         else:
             tier = "discovery"
-            label = f"A new discovery · ranked #{rank:,} by recent downloads"
+            label = f"A new discovery · ranked #{rank:,} by downloads in the last 30 days"
 
         return {
             "tier": tier, "label": label,
-            "detail": f"Rank #{rank:,} of {total:,} indexed {language_name} titles · {downloads:,} downloads in the last 30 days",
+            "detail": f"Rank #{rank:,} of {total:,} indexed {language_name} titles · {downloads:,} approximate downloads in the last 30 days",
             "rank": rank, "total": total, "downloads_30d": downloads, "top_percent": pct,
             "snapshot_date": self.snapshot.get("generated_at"),
             "source_url": f"https://www.gutenberg.org/ebooks/{record['id']}",
@@ -151,7 +151,7 @@ class GutendexPool:
             "gutenberg_id": gid, "rights_status": "public_domain_candidate",
             "source_provider": "Project Gutenberg", "source_url": f"https://www.gutenberg.org/ebooks/{gid}",
             "source_credit": f"Text source: Project Gutenberg eBook #{gid}",
-            "source_license_note": "Gutendex lists this title as public domain in the USA. Copyright status can differ by country.",
+            "source_license_note": "Project Gutenberg records this title as public domain in the USA. Copyright status can differ by country.",
             "text_url": text_url, "popularity": self.popularity_payload(record, language),
         }
 
@@ -166,12 +166,35 @@ class GutendexPool:
         if cache.is_file(): return cache.read_text(encoding="utf-8")
         with self._lock:
             if cache.is_file(): return cache.read_text(encoding="utf-8")
-            req = urllib.request.Request(book["text_url"], headers={"User-Agent": "LiteraryRoulette/0.4 (on-demand text reader)"})
-            try:
-                with urllib.request.urlopen(req, timeout=45) as response: raw = response.read()
-                time.sleep(1.0)
-            except (urllib.error.URLError, TimeoutError) as exc:
-                raise RuntimeError(f"Could not retrieve Project Gutenberg eBook #{gid}: {exc}") from exc
+            req = urllib.request.Request(book["text_url"], headers={
+                "User-Agent": "LiteraryRoulette/0.5 (on-demand text reader)",
+                "Accept-Encoding": "identity",
+                "Connection": "close",
+            })
+            last_error = None
+            raw = None
+            for attempt in range(4):
+                try:
+                    with urllib.request.urlopen(req, timeout=60) as response:
+                        content_type = response.headers.get_content_type().lower()
+                        raw = response.read()
+                    if content_type in ("text/html", "application/json", "application/xhtml+xml"):
+                        raise RuntimeError(f"Project Gutenberg eBook #{gid} returned {content_type}, not plain text.")
+                    probe = raw[:512].lstrip().lower()
+                    if probe.startswith((b"<!doctype html", b"<html", b"{\"error\"")):
+                        raise RuntimeError(f"Project Gutenberg eBook #{gid} returned an error page instead of book text.")
+                    time.sleep(1.0)  # polite gap between full-text downloads
+                    break
+                except urllib.error.HTTPError as exc:
+                    last_error = f"HTTP {exc.code}"
+                    if exc.code not in (408, 425, 429, 500, 502, 503, 504):
+                        raise RuntimeError(f"Project Gutenberg eBook #{gid} returned HTTP {exc.code}.") from exc
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    last_error = str(getattr(exc, "reason", exc))
+                if attempt < 3:
+                    time.sleep((2, 5, 12)[attempt])
+            if raw is None:
+                raise RuntimeError(f"Could not retrieve Project Gutenberg eBook #{gid} after 4 attempts: {last_error}")
             text = None
             for encoding in ("utf-8-sig", "utf-8", "big5", "gb18030"):
                 try:

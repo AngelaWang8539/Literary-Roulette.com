@@ -10,6 +10,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session
 import analytics
 from catalogue import LINK_KINDS, Catalogue, load_json_list
 from gutenberg_pool import GutendexPool
+from catalogue_refresh import catalogue_status, reload_pool_if_changed, start_catalogue_refresh
 
 SITE = {"creator_name": "[Your Name]", "contact_email": "[rights contact email to be added]"}
 MAX_SEEN = 150
@@ -43,12 +44,14 @@ def create_app(test_config=None):
         ALLOW_DEMO=os.environ.get("LR_ALLOW_DEMO", "0") == "1",
         DEFAULT_LANGUAGE="en", RNG=None, SITE=SITE,
         GUTENBERG_CATALOG_PATH=None, GUTENBERG_CACHE_DIR=None,
+        AUTO_REFRESH_CATALOGUE=True, CATALOGUE_MAX_AGE_HOURS=24,
     )
     if test_config:
         app.config.update(test_config)
 
     data_dir = Path(app.config["DATA_DIR"])
-    app.secret_key = load_secret(Path(app.config["INSTANCE_DIR"]))
+    instance_dir = Path(app.config["INSTANCE_DIR"])
+    app.secret_key = load_secret(instance_dir)
     db_path = app.config["DB_PATH"] or Path(app.config["INSTANCE_DIR"]) / "analytics.db"
     problems = []
     catalogues = {}
@@ -84,20 +87,45 @@ def create_app(test_config=None):
     unmatched_popularity = gutendex.attach_popularity(catalogues)
     if gutendex.is_partial_snapshot:
         app.logger.warning(
-            "Gutendex metadata is a page-limited preview (%s); popularity badges are hidden. "
-            "Run `python3 tools/sync_gutendex.py` without --max-pages for full rankings.",
+            "Project Gutenberg metadata is a page-limited preview (%s); popularity badges are hidden. "
+            "Run `python3 tools/sync_gutenberg_rdf.py` for a complete catalogue and full rankings.",
             gutendex.partial_reason,
         )
     for item in unmatched_popularity:
         app.logger.warning(
-            "No Gutendex popularity record matched curated book %s (Gutenberg #%s, language=%s). "
-            "Check the full metadata sync and the record's Gutendex eligibility.",
+            "No matching Project Gutenberg popularity record found for curated book %s (Gutenberg #%s, language=%s). "
+            "Check the metadata refresh and the record's language, rights and text-format eligibility.",
             item["title"], item["gutenberg_id"], item["language"],
         )
     for language, cat in catalogues.items():
         if gutendex.count(language):
-            app.logger.info("%s Gutendex metadata: %d titles available for on-demand selection.", language, gutendex.count(language))
+            app.logger.info("%s Project Gutenberg metadata: %d titles available for on-demand selection.", language, gutendex.count(language))
     analytics.init_db(db_path)
+
+    # The last verified metadata snapshot is served immediately. A single background
+    # worker refreshes it only when older than the configured threshold.
+    catalogue_status_path = instance_dir / "gutenberg_catalogue_status.json"
+    catalogue_lock_path = instance_dir / "gutenberg_catalogue_refresh.lock"
+
+    def reload_catalogue_after_refresh():
+        reload_pool_if_changed(gutendex, catalogues, force=True)
+
+    start_catalogue_refresh(
+        project_root=base,
+        snapshot_path=gutendex_path,
+        archive_path=instance_dir / "gutenberg_rdf" / "rdf-files.tar.bz2",
+        status_path=catalogue_status_path,
+        lock_path=catalogue_lock_path,
+        after_success=reload_catalogue_after_refresh,
+        logger=app.logger,
+        max_age_hours=float(app.config.get("CATALOGUE_MAX_AGE_HOURS", 24)),
+        enabled=bool(app.config.get("AUTO_REFRESH_CATALOGUE", True)) and not app.testing,
+    )
+
+    @app.before_request
+    def reload_catalogue_if_another_worker_updated_it():
+        if reload_pool_if_changed(gutendex, catalogues):
+            app.logger.info("Loaded a newly published Gutenberg metadata snapshot.")
 
     def rng():
         return app.config["RNG"] or random
@@ -173,6 +201,10 @@ def create_app(test_config=None):
     def about():
         return render_template("about.html", site=app.config["SITE"], language=active_language())
 
+    @app.get("/api/catalogue/status")
+    def catalogue_refresh_status():
+        return jsonify(catalogue_status(catalogue_status_path, gutendex_path, gutendex))
+
     @app.get("/api/languages")
     def languages():
         return jsonify(ok=True, active=active_language(), languages=[
@@ -194,11 +226,14 @@ def create_app(test_config=None):
         language = active_language()
         cat = catalogues[language]
         if not cat.book_ids and not gutendex.count(language):
-            return fail("empty_catalogue", f"No {LANGUAGES[language]} books are ready. Sync the Gutendex catalogue or prepare a local catalogue text.", 503)
+            return fail("empty_catalogue", f"No {LANGUAGES[language]} books are ready yet. The metadata catalogue may still be downloading; wait for the librarian status to finish, then try again.", 503)
         session[session_key("seen_p", language)] = []
         session[session_key("seen_b", language)] = []
         session[session_key("revealed", language)] = None
         try:
+            # Rehydrate previously downloaded texts before choosing a new title.
+            # This gives the app a local fallback if Gutenberg is temporarily down.
+            gutendex.restore_cached_books(language, cat)
             if gutendex.count(language):
                 passage, _restarted = gutendex.pick_passage(language, cat, rng(), set())
                 if passage is None:
@@ -206,8 +241,14 @@ def create_app(test_config=None):
             else:
                 passage = cat.pick_first(rng())
         except Exception as exc:
-            app.logger.exception("Gutenberg book could not be prepared")
-            return fail("gutenberg_fetch_failed", f"This book could not be prepared just now. Please spin again. Details: {exc}", 502)
+            app.logger.warning("On-demand Gutenberg selection failed; trying the verified local shelf: %s", exc)
+            gutendex.restore_cached_books(language, cat)
+            if not cat.book_ids:
+                app.logger.exception("No local/cached fallback book is available")
+                return fail("gutenberg_fetch_failed", "The selected book could not be loaded and there is no saved book ready in this language yet. Please try again shortly.", 502)
+            passage = cat.pick_first(rng())
+            remember("seen_b", language, cat.book_token(cat.book_of(passage)))
+            return show(language, cat, passage, notice="One library text was temporarily unavailable, so we opened a book from the saved shelf instead.")
         remember("seen_b", language, cat.book_token(cat.book_of(passage)))
         return show(language, cat, passage)
 
@@ -254,15 +295,25 @@ def create_app(test_config=None):
                 )
                 nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
         except Exception as exc:
-            app.logger.exception("Next Gutenberg book could not be prepared")
-            return fail("gutenberg_fetch_failed", f"The next book could not be prepared just now. Please try again. Details: {exc}", 502)
+            app.logger.warning("On-demand Gutenberg spin failed; trying the verified local shelf: %s", exc)
+            gutendex.restore_cached_books(language, cat)
+            bid, restarted = cat.pick_other_book(
+                passage["book_id"], set(seen("seen_b", language)), rng()
+            )
+            nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
+            if nxt is not None:
+                extra["notice"] = "One library text was temporarily unavailable, so we opened another saved book instead."
+            else:
+                app.logger.exception("No alternative local/cached book is available")
+                return fail("gutenberg_fetch_failed", "The next library text could not be loaded. Your current passage is safe; please try spinning again shortly.", 502)
         if nxt is None:
             return jsonify(ok=False, code="only_one_book", language=language,
                            message="Only one usable book is available in this collection.")
         if restarted:
             session[session_key("seen_b", language)] = []
             session[session_key("seen_p", language)] = []
-            extra["notice"] = "You have met every book in this language. Starting a fresh round."
+            round_notice = "You have met every book in this language. Starting a fresh round."
+            extra["notice"] = (extra.get("notice", "") + " " + round_notice).strip()
         remember("seen_b", language, cat.book_token(cat.book_of(nxt)))
         session[session_key("revealed", language)] = None
         return show(language, cat, nxt, **extra)
@@ -298,9 +349,16 @@ def create_app(test_config=None):
     def add_language_switcher(response):
         if request.path in ("/", "/about") and response.status_code == 200 and response.mimetype == "text/html":
             html = response.get_data(as_text=True)
-            script = '<script src="/static/js/language-switcher.js" defer></script>'
-            if script not in html:
-                html = html.replace("</body>", script + "</body>") if "</body>" in html else html + script
+            scripts = (
+                '<script src="/static/js/language-switcher.js" defer></script>',
+                '<script src="/static/js/catalogue-refresh.js" defer></script>',
+            )
+            changed = False
+            for script in scripts:
+                if script not in html:
+                    html = html.replace("</body>", script + "</body>") if "</body>" in html else html + script
+                    changed = True
+            if changed:
                 response.set_data(html)
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"

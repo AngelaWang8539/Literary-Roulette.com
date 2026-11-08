@@ -7,3 +7,5 @@ venv/
 *.db
 .env
 *.env
+instance/
+data/gutendex_catalog.json
