@@ -77,7 +77,7 @@ def _split_chinese(text, target=780, maximum=1150):
 
 class Catalogue:
     def __init__(self, books, passages, secret, allow_demo=False, covers_dir=None, texts_dir=None,
-                 manifest=None, language="en", lazy_text=False, max_loaded_books=2):
+                 manifest=None, language="en", lazy_text=False, max_loaded_books=None):
         self.language = language
         self.covers_dir = Path(covers_dir) if covers_dir else None
         self.texts_dir = Path(texts_dir) if texts_dir else None
@@ -87,7 +87,7 @@ class Catalogue:
         self.books, self.passages, self.passages_by_book = {}, {}, {}
         self.text_books = set()
         self.lazy_text = bool(lazy_text)
-        self.max_loaded_books = max(1, int(max_loaded_books))
+        self.max_loaded_books = max(1, int(max_loaded_books)) if max_loaded_books is not None else None
         self._loaded_book_order = OrderedDict()
         self._generated_ids_by_book = {}
 
@@ -145,7 +145,7 @@ class Catalogue:
         """Mark generated passages as recently used and enforce the memory cap."""
         self._loaded_book_order.pop(bid, None)
         self._loaded_book_order[bid] = None
-        while len(self._loaded_book_order) > self.max_loaded_books:
+        while self.max_loaded_books is not None and len(self._loaded_book_order) > self.max_loaded_books:
             oldest = next(iter(self._loaded_book_order))
             self.evict_book(oldest)
 
