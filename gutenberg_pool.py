@@ -322,6 +322,6 @@ class GutendexPool:
                 cat.books[bid]["popularity"] = self.popularity_payload(record, language)
         if bid in cat.books:
             self.ensure_book_loaded(language, cat, cat.books[bid])
-        passages = cat.passages_by_book.get(bid, [])
-        if not passages: raise RuntimeError(f"No usable passages were generated for {bid}.")
-        return rng.choice(passages), restarted
+        if not cat.passages_by_book.get(bid):
+            raise RuntimeError(f"No usable passages were generated for {bid}.")
+        return cat.pick_in_book(bid, set(), rng), restarted
