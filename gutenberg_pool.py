@@ -349,6 +349,21 @@ class GutendexPool:
                 return restored
         return None
 
+    def ensure_external_book_loaded(self, language, cat, book):
+        """Load exactly one remote book into the bounded in-memory passage cache."""
+        bid = book["id"]
+        if cat.passages_by_book.get(bid):
+            cat._touch_loaded_book(bid)
+            return True
+        gid = book.get("gutenberg_id")
+        if not str(gid or "").isdigit():
+            return False
+        restored = self.restore_cached_book(language, cat, int(gid))
+        if restored:
+            return True
+        cat.add_external_book(book, self._fetch_text(book))
+        return bool(cat.passages_by_book.get(bid))
+
     def pick_passage(self, language, cat, rng=random, seen_book_tokens=None, current_book_id=None):
         seen_book_tokens = set(seen_book_tokens or ())
         rows = self._candidate_records(language, cat)
