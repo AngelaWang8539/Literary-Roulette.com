@@ -1,10 +1,13 @@
 import io
+import os
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from tools.sync_gutenberg_rdf import parse_archive, parse_rdf_record
+from gutenberg_pool import GutendexPool
 
 RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
 DCT_NS = 'http://purl.org/dc/terms/'
@@ -27,6 +30,33 @@ def fixture(gid=1342, language='en', rights='Public domain in the USA.', downloa
         </pgterms:file></dcterms:hasFormat>
       </pgterms:ebook>
     </rdf:RDF>'''.encode('utf-8')
+
+
+class TextCacheLimitTests(unittest.TestCase):
+    def test_disk_cache_is_pruned_by_age_file_count_and_total_bytes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = root / "cache" / "en"
+            cache.mkdir(parents=True)
+            old = cache / "pg1.txt"
+            recent_a = cache / "pg2.txt"
+            recent_b = cache / "pg3.txt"
+            old.write_text("old!", encoding="utf-8")
+            recent_a.write_text("one!", encoding="utf-8")
+            recent_b.write_text("two!", encoding="utf-8")
+            now = time.time()
+            os.utime(old, (now - 7200, now - 7200))
+            os.utime(recent_a, (now - 20, now - 20))
+            os.utime(recent_b, (now - 10, now - 10))
+
+            pool = GutendexPool(
+                root / "missing-catalogue.json", root / "cache",
+                max_cache_files=2, max_cache_bytes=8, cache_ttl_seconds=3600,
+            )
+            self.assertFalse(old.exists())  # expired files are removed
+            self.assertTrue(recent_a.exists())
+            self.assertTrue(recent_b.exists())
+            self.assertEqual(sum(p.stat().st_size for p in cache.glob("pg*.txt")), 8)
 
 
 class RDFImportTests(unittest.TestCase):
