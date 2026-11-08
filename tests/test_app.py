@@ -55,16 +55,17 @@ class RouteTests(Base):
         self.build()
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('class="language-bar"', html)
-        self.assertIn('lang="en"', html)
-        self.assertIn('lang="de"', html)
-        self.assertIn('lang="zh-Hans"', html)
-        self.assertIn("More language collections will be added later", html)
+        self.assertIn('<html lang="en">', html)
+        self.assertIn("Layout reserved for the future multilingual-catalogue patch", html)
+        self.assertIn("Only English works in this version", html)
 
     def test_start_is_anonymous_and_page_hides_books(self):
         self.build()
         raw = self.client.get("/api/passage/start").get_data(as_text=True)
         data = json.loads(raw)
-        self.assertEqual(set(data), {"ok", "token", "book_token", "text", "content_warning", "spoiler_level"})
+        self.assertTrue({"ok", "token", "book_token", "text", "content_warning", "spoiler_level"}.issubset(data))
+        self.assertEqual(data["language"], "en")
+        self.assertEqual(data["language_label"], "English")
         for secret in ("Alpha", "Beta", "Gamma", "Ann Author", "Mystery", "Test ed."):
             self.assertNotIn(secret, raw)
         html = self.client.get("/").get_data(as_text=True)
