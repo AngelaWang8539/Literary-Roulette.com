@@ -57,7 +57,13 @@ def create_app(test_config=None):
     catalogues = {}
     gutendex_path = Path(app.config.get("GUTENBERG_CATALOG_PATH") or data_dir / "gutendex_catalog.json")
     gutendex_cache = Path(app.config.get("GUTENBERG_CACHE_DIR") or Path(app.config["INSTANCE_DIR"]) / "gutenberg_cache")
+    try:
+        loaded_mtime_ns = gutendex_path.stat().st_mtime_ns
+    except OSError:
+        loaded_mtime_ns = None
     gutendex = GutendexPool(gutendex_path, gutendex_cache)
+    # Remember which snapshot is already loaded, so the first request does not parse the whole file again.
+    gutendex._lr_loaded_mtime_ns = loaded_mtime_ns
 
     for language, label in LANGUAGES.items():
         folder = data_dir if language == "en" else data_dir / language
@@ -101,6 +107,10 @@ def create_app(test_config=None):
         if gutendex.count(language):
             app.logger.info("%s Project Gutenberg metadata: %d titles available for on-demand selection.", language, gutendex.count(language))
     analytics.init_db(db_path)
+    if not app.testing:
+        analytics.start_writer(db_path)   # clicks never wait for the database
+    # Build the book-selection index now so no reader pays for it on their first spin or reveal.
+    gutendex.prewarm(catalogues)
 
     # The last verified metadata snapshot is served immediately. A single background
     # worker refreshes it only when older than the configured threshold.
@@ -352,6 +362,8 @@ def create_app(test_config=None):
             extra["notice"] = (extra.get("notice", "") + " " + round_notice).strip()
         remember("seen_b", language, cat.book_token(cat.book_of(nxt)))
         session[session_key("revealed", language)] = None
+        if nxt["book_id"] != current_book_id:
+            cat.release_book(current_book_id)   # drop the previous whole-book text from memory
         return show(language, cat, nxt, **extra)
 
     @app.post("/api/event")

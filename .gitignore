@@ -9,3 +9,6 @@ venv/
 *.env
 instance/
 data/gutendex_catalog.json
+*.db-wal
+*.db-shm
+data/gutendex_catalog.sync_progress.json

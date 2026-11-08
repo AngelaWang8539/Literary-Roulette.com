@@ -55,9 +55,10 @@ class GutendexPool:
         self.is_partial_snapshot = False
         self.partial_reason = None
         self._lock = threading.Lock()
-        self._book_token_indexes = {}
-        self.max_cache_books = 8
-        self.max_cache_bytes = 64 * 1024 * 1024
+        self._rows_cache = {}          # language -> (rows, by_token); built once per metadata snapshot
+        self._rows_lock = threading.Lock()
+        self.max_cache_books = int(os.environ.get("LR_TEXT_CACHE_BOOKS", "6"))
+        self.max_cache_bytes = int(float(os.environ.get("LR_TEXT_CACHE_MB", "32")) * 1024 * 1024)
         self.cache_max_age_seconds = 14 * 24 * 60 * 60
         try:
             data = json.loads(self.catalog_path.read_text(encoding="utf-8"))
@@ -250,11 +251,55 @@ class GutendexPool:
             rows.append({"book_id": bid, "record": None})
         return rows
 
+    def _rows(self, language, cat):
+        """Selectable books for one language as (book_id, token, record) rows, plus a token index.
+
+        Built once per metadata snapshot. Spinning and revealing then cost a few dictionary
+        lookups instead of re-scanning (and re-hashing) the whole Gutenberg catalogue.
+        """
+        cached = self._rows_cache.get(language)
+        if cached is not None:
+            return cached
+        with self._rows_lock:
+            cached = self._rows_cache.get(language)
+            if cached is not None:
+                return cached
+            local_by_gid, rows = {}, []
+            for bid, book in cat.books.items():
+                if "text_url" in book:      # an on-demand title loaded earlier; rebuilt from its record below
+                    continue
+                if bid not in cat.book_ids and not cat.passages_by_book.get(bid):
+                    continue
+                gid = book.get("gutenberg_id")
+                if str(gid or "").isdigit():
+                    local_by_gid[int(gid)] = bid
+                else:
+                    rows.append([bid, None])
+            matched = set()
+            for record in self.records.get(language, []):
+                gid = int(record["id"])
+                local_id = local_by_gid.get(gid)
+                if local_id:
+                    matched.add(local_id)
+                rows.append([local_id or f"pg-{language}-{gid}", record])
+            for bid in set(local_by_gid.values()) - matched:
+                rows.append([bid, None])
+            tokens = cat.tokens("b", [r[0] for r in rows])
+            built = [(r[0], tok, r[1]) for r, tok in zip(rows, tokens)]
+            result = (built, {row[1]: row for row in built})
+            self._rows_cache[language] = result
+            return result
+
+    def prewarm(self, catalogues):
+        """Build the selection index at start-up / after a metadata refresh, not on a reader's click."""
+        for language, cat in catalogues.items():
+            self._rows(language, cat)
+
     def available_count(self, language, cat):
-        return len(self._candidate_records(language, cat))
+        return len(self._rows(language, cat)[0])
 
     def _prune_cache(self):
-        """Keep at most eight recent on-demand texts and 64 MB on disk."""
+        """Keep only a few recent on-demand texts on disk (default 6 books / 32 MB)."""
         now = time.time()
         files = [p for p in self.cache_dir.glob("*/*.txt") if p.is_file()]
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -277,22 +322,19 @@ class GutendexPool:
                 except OSError: pass
 
     def book_for_token(self, language, cat, token):
-        """Resolve a book from metadata only; never loads its full text."""
+        """Resolve a book from metadata only (one dict lookup); never loads its full text."""
         bid = cat._b_tokens.get(token)
         if bid:
             book = cat.books.get(bid)
             if book:
                 return book
-        # Build this language's token index once per metadata snapshot. A later
-        # refresh constructs a new pool and therefore a fresh index.
-        index = self._book_token_indexes.get(language)
-        if index is None:
-            index = {}
-            for record in self.records.get(language, []):
-                book_id = f"pg-{language}-{int(record['id'])}"
-                index[cat.token("b", book_id)] = record
-            self._book_token_indexes[language] = index
-        record = index.get(token)
+        row = self._rows(language, cat)[1].get(token)
+        if not row:
+            return None
+        bid, _token, record = row
+        book = cat.books.get(bid)
+        if book:
+            return book
         return self._book_record(record, language, require_text_url=False) if record else None
 
     def ensure_book_loaded(self, language, cat, book):
@@ -310,27 +352,36 @@ class GutendexPool:
         return None
 
     def pick_passage(self, language, cat, rng=random, seen_book_tokens=None, current_book_id=None):
-        seen_book_tokens = set(seen_book_tokens or ())
-        rows = self._candidate_records(language, cat)
+        seen_book_tokens = seen_book_tokens or ()
+        rows = self._rows(language, cat)[0]
         if not rows: return None, False
-        def token_and_id(row):
-            bid = row.get("book_id") or f"pg-{language}-{int(row['record']['id'])}"
-            return cat.token("b", bid), bid
-        fresh = [r for r in rows if token_and_id(r)[0] not in seen_book_tokens and token_and_id(r)[1] != current_book_id]
+
+        def usable(row):
+            return row[1] not in seen_book_tokens and row[0] != current_book_id
+
+        chosen = None
+        for _ in range(24):                 # a handful of random draws is enough for a big catalogue
+            row = rng.choice(rows)
+            if usable(row):
+                chosen = row
+                break
         restarted = False
-        choices = fresh
-        if not choices:
-            choices = [r for r in rows if token_and_id(r)[1] != current_book_id]
-            restarted = True
-        if not choices: return None, False
-        selected = rng.choice(choices)
-        bid, record = selected.get("book_id"), selected.get("record")
+        if chosen is None:                  # tiny catalogue, or nearly everything already seen
+            fresh = [r for r in rows if usable(r)]
+            if not fresh:
+                fresh = [r for r in rows if r[0] != current_book_id]
+                restarted = True
+            if not fresh: return None, False
+            chosen = rng.choice(fresh)
+
+        bid, _token, record = chosen
         if record:
-            if not bid:
+            book = cat.books.get(bid)
+            if book is None:
                 book = self._book_record(record, language)
                 bid = cat.add_external_book(book, self._fetch_text(book))
             else:
-                cat.books[bid]["popularity"] = self.popularity_payload(record, language)
+                book["popularity"] = self.popularity_payload(record, language)
         if bid in cat.books:
             self.ensure_book_loaded(language, cat, cat.books[bid])
         if not cat.passages_by_book.get(bid):
