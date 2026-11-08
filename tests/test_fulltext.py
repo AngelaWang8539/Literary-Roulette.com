@@ -36,8 +36,10 @@ class FullTextCatalogueTests(Base):
         self.build_texts()
         cat = self.app.catalogue
         self.assertEqual(set(cat.book_ids), {"big", "small"})
-        self.assertGreater(len(cat.passages_by_book["big"]), 5 * len(cat.passages_by_book["small"]))
-        self.assertTrue(all(p["id"].startswith(("big:v1:", "small:v1:")) for p in cat.passages.values()))
+        self.assertEqual(cat.passages_by_book, {})  # no full texts are loaded at startup
+        cat.ensure_book_loaded("big")
+        self.assertGreater(len(cat.passages_by_book["big"]), 5)
+        self.assertTrue(all(p["id"].startswith("big:v1:") for p in cat.passages_by_book["big"]))
 
     def test_book_fairness_with_unequal_lengths(self):
         self.build_texts()
@@ -72,6 +74,22 @@ class FullTextCatalogueTests(Base):
         again = create_app(self.app.config.copy()).test_client()
         res = again.post("/api/book/reveal", json={"token": first["token"]}).get_json()
         self.assertTrue(res["ok"])
+
+    def test_reveal_is_metadata_only_and_never_restores_the_whole_cache(self):
+        self.build_texts()
+        first = self.start()
+        self.app.gutendex_pool.restore_cached_books = lambda *args: (_ for _ in ()).throw(AssertionError("bulk restore called"))
+        result = self.post("/api/book/reveal", book_token=first["book_token"])
+        self.assertTrue(result["ok"])
+        self.assertIn(result["book"]["title"], ("Title big", "Title small"))
+
+    def test_local_full_text_memory_is_limited_to_two_books(self):
+        self.build_texts()
+        cat = self.app.catalogue
+        for bid in ("big", "small", "big", "small"):
+            cat.ensure_book_loaded(bid)
+        self.assertLessEqual(len(cat._active_books), 2)
+        self.assertLessEqual(len(cat.passages_by_book), 2)
 
     def test_unverified_or_tampered_text_is_excluded_and_explained(self):
         self.build_texts()
