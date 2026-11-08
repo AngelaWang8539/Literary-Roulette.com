@@ -320,7 +320,7 @@ class GutendexPool:
                 bid = cat.add_external_book(book, self._fetch_text(book))
             else:
                 cat.books[bid]["popularity"] = self.popularity_payload(record, language)
-        if record and bid in cat.books:
+        if bid in cat.books:
             self.ensure_book_loaded(language, cat, cat.books[bid])
         passages = cat.passages_by_book.get(bid, [])
         if not passages: raise RuntimeError(f"No usable passages were generated for {bid}.")
