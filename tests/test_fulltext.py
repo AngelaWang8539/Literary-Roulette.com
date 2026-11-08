@@ -88,6 +88,24 @@ class FullTextCatalogueTests(Base):
         self.assertTrue(next_passage["ok"])
         self.assertNotEqual(next_passage["text"], first["text"])
 
+    def test_spin_does_not_reload_the_previous_full_text(self):
+        self.build_texts()
+        first = self.start()
+        cat = self.app.catalogue
+        first_book_id = cat.book_of(cat.passage_by_token(first["token"]))["id"]
+        other_id = "small" if first_book_id == "big" else "big"
+        cat.max_active_books = 1
+        cat.ensure_book_loaded(other_id)  # evict the currently displayed book
+        original = cat.ensure_book_loaded
+        def forbid_previous_book(bid):
+            if bid == first_book_id:
+                raise AssertionError("spin should not reload the previous book")
+            return original(bid)
+        cat.ensure_book_loaded = forbid_previous_book
+        spun = self.post("/api/book/spin", token=first["token"], book_token=first["book_token"])
+        self.assertTrue(spun["ok"])
+        self.assertNotEqual(spun["book_token"], first["book_token"])
+
     def test_reveal_is_metadata_only_and_never_restores_the_whole_cache(self):
         self.build_texts()
         first = self.start()
