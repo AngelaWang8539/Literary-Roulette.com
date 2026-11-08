@@ -143,19 +143,26 @@ class Catalogue:
 
     def _evict_passages(self, bid):
         # Keep small approved excerpts resident; evict generated full-book passages.
-        generated = [p for p in self.passages_by_book.get(bid, []) if p.get("generated")]
+        existing = self.passages_by_book.get(bid, [])
+        generated = [p for p in existing if p.get("generated")]
         if not generated:
             return
         for passage in generated:
             self.passages.pop(passage["id"], None)
             self._p_tokens.pop(self.token("p", passage["id"]), None)
-        self.passages_by_book.pop(bid, None)
+        retained = [p for p in existing if not p.get("generated")]
+        if retained:
+            self.passages_by_book[bid] = retained
+        else:
+            self.passages_by_book.pop(bid, None)
 
     def ensure_book_loaded(self, bid):
         """Load one verified local title and retain no more than two full books."""
         if bid not in self.books:
             raise KeyError(f"Unknown book: {bid}")
-        if self.passages_by_book.get(bid):
+        existing = self.passages_by_book.get(bid, [])
+        has_generated = any(p.get("generated") for p in existing)
+        if has_generated:
             if bid in self.text_books or self.books[bid].get("text_url"):
                 self._touch_active(bid)
             return bid
@@ -176,7 +183,8 @@ class Catalogue:
             generated.append(passage)
             self.passages[pid] = passage
             self._p_tokens[self.token("p", pid)] = pid
-        self.passages_by_book[bid] = generated
+        retained = [p for p in self.passages_by_book.get(bid, []) if not p.get("generated")]
+        self.passages_by_book[bid] = retained + generated
         self._touch_active(bid)
         return bid
 
