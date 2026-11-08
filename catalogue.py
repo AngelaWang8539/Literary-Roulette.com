@@ -236,7 +236,7 @@ class Catalogue:
             return "no text folder configured"
         entry = self.manifest.get(book["id"])
         if not entry:
-            return "no manifest record for this book"
+            return "no manifest record for this book; run tools/ingest_gutenberg.py to verify its local text"
         if entry.get("verified") is not True:
             return "; ".join(entry.get("problems", ["text not verified"]))
         path = self._text_path(book)
@@ -247,7 +247,7 @@ class Catalogue:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         if digest.hexdigest() != entry.get("text_sha256"):
-            return "cleaned text changed after verification; rerun the language importer"
+            return "cleaned text changed since verification; rerun the language importer"
         return None
 
     def _rights_ok(self, status, book):
