@@ -4,6 +4,7 @@ import hmac
 import json
 import random
 import re
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlparse
@@ -90,6 +91,7 @@ class Catalogue:
         self.max_loaded_books = max(1, int(max_loaded_books)) if max_loaded_books is not None else None
         self._loaded_book_order = OrderedDict()
         self._generated_ids_by_book = {}
+        self._load_lock = threading.RLock()
 
         for b in books:
             if isinstance(b, dict) and isinstance(b.get("id"), str) and (b.get("gutenberg_id") or b.get("text_file")):
@@ -168,7 +170,11 @@ class Catalogue:
                 self.book_ids.remove(bid)
 
     def ensure_book_loaded(self, bid):
-        """Load one verified local full text on demand."""
+        """Thread-safe on-demand load of one verified local full text."""
+        with self._load_lock:
+            return self._ensure_book_loaded(bid)
+
+    def _ensure_book_loaded(self, bid):
         if bid not in self.books:
             return False
         if self._generated_ids_by_book.get(bid):
@@ -197,7 +203,11 @@ class Catalogue:
         return True
 
     def add_external_book(self, book, text):
-        """Register one downloaded Gutenberg title and generate its passages."""
+        """Thread-safe registration of one downloaded Gutenberg title."""
+        with self._load_lock:
+            return self._add_external_book(book, text)
+
+    def _add_external_book(self, book, text):
         bid = book["id"]
         if bid in self.books and self._generated_ids_by_book.get(bid):
             self._touch_loaded_book(bid)
