@@ -99,6 +99,7 @@ function showPassage(p, { record = true } = {}) {
 
 // ---------- book details ----------
 function renderBook(b) {
+  if (!ui.popularity) { ui.popularity = el("div", "popularity-badge"); ui.author.after(ui.popularity); } // self-heal an older template
   ui.title.textContent = b.title; ui.author.textContent = "by " + b.author; ui.desc.textContent = b.description || "";
   ui.demo.hidden = !b.is_demo;
   ui.popularity.replaceChildren();
@@ -157,7 +158,7 @@ function closeDetails(tellServer) {
   if (tellServer && S.source === "catalogue" && S.token) api("/api/event", { token: S.token, book_token: S.bookKey, event: "book_hidden" });
 }
 function afterReveal(book) {
-  counts.books++; updateCounts(); openDetails(book);
+  openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
   ready.then(() => lib.markBookRevealed(S.source, S.bookKey, book)).catch(() => {});
   ui.awareness.hidden = S.source !== "catalogue";
   setStatus("Book revealed. Your passage has not changed.");
