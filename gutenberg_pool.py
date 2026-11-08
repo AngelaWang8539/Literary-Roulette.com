@@ -77,6 +77,8 @@ class GutendexPool:
             self.load_error = "Project Gutenberg metadata has not been synced yet."
         except (OSError, ValueError, TypeError) as exc:
             self.load_error = f"Project Gutenberg metadata could not be read: {exc}"
+        # Also clean up leftovers from older runs when the server starts.
+        self._prune_cache()
 
     def count(self, language):
         return len(self.records.get(language, []))
