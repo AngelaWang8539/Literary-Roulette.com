@@ -33,7 +33,8 @@ const ready = (async () => {
     if (!globalThis.indexedDB) throw new Error("IndexedDB unavailable");
     const adapter = idbAdapter();
     await adapter.getAll("history");
-    lib = createLibrary(adapter);
+    lib = createLibrary(adapter, { historyLimit: 80 });
+    await lib.pruneHistory();
   } catch {
     lib = createLibrary(memoryAdapter());
     $("storage-warning").hidden = false;
