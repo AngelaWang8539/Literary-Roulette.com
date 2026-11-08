@@ -8,9 +8,11 @@ Read a passage first. Reveal the book only when you choose to. This is a separat
 
 - The agreed **40-book English catalogue**: 25 familiar-classic candidates and 15 discovery candidates.
 - Full-text ingestion and local storage. Once imported and reviewed, full texts are kept in `data/texts/`; a normal spin does not contact Project Gutenberg.
-- Passages generated from the stored text, targeting roughly 80–150 words while respecting paragraphs and sentences where possible.
+- Passages generated from a verified stored text only when that book is selected, targeting roughly 80–150 words while respecting paragraphs and sentences where possible.
+- At most two generated full-book passage sets remain in each server worker memory; older active books are evicted and can be reloaded when needed.
+- On-demand Gutenberg full-text disk cache is bounded to 8 books / 64 MB and expires after 14 days. The persistent curated `data/texts/` source corpus is retained so verified editions do not need to be downloaded again.
 - Three independent actions: another passage from this book, reveal this book, and spin another book.
-- My History with search, revealed/unrevealed filters, reopen/reveal/remove actions, and clear-history confirmation.
+- My History with search, revealed/unrevealed filters, reopen/reveal/remove actions, and clear-history confirmation. It keeps the newest 80 complete passages; book-text cache eviction does not remove History.
 - My Saved Books.
 - Browser-local `.txt` and `.epub` uploads, stored in IndexedDB and never sent to the server.
 - Lightweight SQLite event analytics and a local `stats.py` report.
@@ -82,6 +84,7 @@ A visible notice identifies fictional demo books. Do not use demo records as evi
 - `data/passages.json`: currently empty for public-approved excerpts; full-text passages are generated from `data/texts/*.txt` at server startup.
 - `data/texts_raw/`: downloaded source text cache used by the importer.
 - `data/texts/`: cleaned, complete local texts plus `manifest.json` verification details.
+- `instance/gutenberg_cache/`: bounded temporary full-text cache for books fetched on demand from the metadata catalogue (8 books / 64 MB / 14 days).
 - `instance/analytics.db`: aggregate product event counts. It does not store a visitor's full browsing history or raw IP address.
 - Browser IndexedDB: reader's history, saved books, and personal uploads. These stay in the current browser and do not sync across devices.
 
