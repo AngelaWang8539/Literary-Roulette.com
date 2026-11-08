@@ -204,7 +204,17 @@ def create_app(test_config=None):
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return None
-        return find_passage(body.get("token"), body.get("book_token"))
+        book_token = body.get("book_token")
+        if not book_token:
+            # Compatibility for older pages that send only the passage token.
+            # The current book token is small session state, not book text.
+            for language in catalogues:
+                book_token = session.get(session_key("current_book", language))
+                if book_token:
+                    found = find_passage(body.get("token"), book_token)
+                    if found:
+                        return found
+        return find_passage(body.get("token"), book_token)
 
     def record(cat, event, passage):
         book = cat.book_of(passage)
@@ -213,6 +223,7 @@ def create_app(test_config=None):
     def show(language, cat, passage, **extra):
         remember("seen_p", language, cat.passage_token(passage))
         book = cat.book_of(passage)
+        session[session_key("current_book", language)] = cat.book_token(book)
         record(cat, "passage_displayed", passage)
         data = {
             "ok": True, "language": language, "language_label": LANGUAGES[language],
@@ -299,7 +310,16 @@ def create_app(test_config=None):
         body = request.get_json(silent=True)
         body = body if isinstance(body, dict) else {}
         book_token = body.get("book_token")
-        found = find_passage(body.get("token"), book_token) if body.get("token") else None
+        # Only inspect passages already resident in memory for analytics. Never
+        # rehydrate a passage here: a reveal must not read/download full text.
+        found = None
+        passage_token = body.get("token")
+        if isinstance(passage_token, str):
+            for lang, candidate_cat in catalogues.items():
+                resident = candidate_cat.passage_by_token(passage_token)
+                if resident:
+                    found = (lang, candidate_cat, resident)
+                    break
 
         # Reveal is a metadata operation. It can succeed with the stable book
         # token alone, without fetching or splitting the complete book text.
@@ -343,7 +363,6 @@ def create_app(test_config=None):
                 nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
         except Exception as exc:
             app.logger.warning("On-demand Gutenberg spin failed; trying the verified local shelf: %s", exc)
-            gutendex.restore_cached_books(language, cat)
             bid, restarted = cat.pick_other_book(
                 passage["book_id"], set(seen("seen_b", language)), rng()
             )
