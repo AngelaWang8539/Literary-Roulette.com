@@ -80,9 +80,10 @@ class FullTextCatalogueTests(Base):
         first = self.start()
         cat = self.app.catalogue
         cat.max_active_books = 1
-        other_id = "small" if cat.book_of(cat.passage_by_token(first["token"]))["id"] == "big" else "big"
+        first_book_id = cat.book_of(cat.passage_by_token(first["token"]))["id"]
+        other_id = "small" if first_book_id == "big" else "big"
         cat.ensure_book_loaded(other_id)  # evicts the first full-text passage array
-        self.assertNotIn(cat.book_of(cat.passage_by_token(first["token"]))["id"], cat.passages_by_book)
+        self.assertIsNone(cat.passage_by_token(first["token"]))
         next_passage = self.post("/api/passage/another", token=first["token"], book_token=first["book_token"])
         self.assertTrue(next_passage["ok"])
         self.assertNotEqual(next_passage["text"], first["text"])
