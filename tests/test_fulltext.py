@@ -102,6 +102,11 @@ class FullTextCatalogueTests(Base):
         self.assertIsNone(cat.passage_by_token(old_token))
         cat.ensure_book_loaded("big")
         self.assertEqual(cat.passage_token(cat.passages_by_book["big"][0]), old_token)
+        # Saved-book links use the stable book token, not an evictable passage token.
+        stable_link = f"/go/read/{cat.book_token(cat.books['big'])}"
+        response = self.client.get(stable_link)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].startswith("https://www.gutenberg.org/ebooks/"))
 
     def test_unverified_or_tampered_text_is_excluded_and_explained(self):
         self.build_texts()
