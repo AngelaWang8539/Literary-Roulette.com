@@ -9,3 +9,12 @@ venv/
 *.env
 instance/
 data/gutendex_catalog.json
+*.db-wal
+*.db-shm
+data/gutendex_catalog.sync_progress.json
+
+# Regenerable importer inputs (kept locally, not in Git; re-download with the tools/ scripts)
+data/zh/source_gutenberg/
+data/fr/source_texts/
+data/book_texts/
+data/texts_raw/

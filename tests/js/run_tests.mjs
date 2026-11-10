@@ -65,6 +65,22 @@ await test("history: add, persist in the same store, search, filter, reveal, rem
   assert.equal((await lib.listHistory()).length, 0);
 });
 
+
+await test("history stores complete passage text but retains only the newest 80 entries", async () => {
+  let clock = 1, id = 0;
+  const lib = createLibrary(memoryAdapter(), { now: () => clock++, uid: () => "h" + (++id) });
+  for (let i = 0; i < 85; i++) {
+    await lib.addHistory({ source: "catalogue", bookKey: "b" + i, passageKey: "p" + i, text: "FULL PASSAGE " + i });
+  }
+  const entries = await lib.listHistory();
+  assert.equal(entries.length, 80);
+  assert.equal(entries[0].text, "FULL PASSAGE 84");
+  assert.equal(entries.at(-1).text, "FULL PASSAGE 5");
+  await lib.markBookRevealed("catalogue", "b84", { title: "Revealed title", author: "Author" });
+  assert.equal((await lib.listHistory())[0].revealed, true);
+  assert.equal((await lib.listHistory())[0].text, "FULL PASSAGE 84");
+});
+
 await test("saved books: save, list, check, remove", async () => {
   const lib = createLibrary(memoryAdapter());
   await lib.saveBook({ source: "catalogue", bookKey: "bk1", title: "T", author: "A", links: [] });

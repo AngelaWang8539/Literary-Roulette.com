@@ -99,6 +99,7 @@ function showPassage(p, { record = true } = {}) {
 
 // ---------- book details ----------
 function renderBook(b) {
+  if (!ui.popularity) { ui.popularity = el("div", "popularity-badge"); ui.author.after(ui.popularity); } // self-heal an older template
   ui.title.textContent = b.title; ui.author.textContent = "by " + b.author; ui.desc.textContent = b.description || "";
   ui.demo.hidden = !b.is_demo;
   ui.popularity.replaceChildren();
@@ -110,7 +111,7 @@ function renderBook(b) {
     ui.popularity.append(el("span", "popularity-label", b.popularity.label));
     if (b.popularity.detail) ui.popularity.append(el("small", "popularity-detail", b.popularity.detail));
     ui.popularity.hidden = false;
-    ui.popularity.title = "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
+    ui.popularity.title = b.popularity.note || "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
     ui.popularity.setAttribute("aria-label", `${b.popularity.label}. ${b.popularity.detail || ""}`.trim());
   } else {
     ui.popularity.hidden = true;
@@ -132,7 +133,7 @@ function renderBook(b) {
   ui.credit.replaceChildren();
   if (b.source_credit) {
     const a = el("a", "", b.source_credit.label); a.href = b.source_credit.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-    ui.credit.append(a, " \u2013 " + b.source_credit.note);
+    ui.credit.append(a, " \u2013 ", el("span", "", b.source_credit.note));
   }
   ui.credit.hidden = !b.source_credit;
   ui.contentNote.textContent = b.content_note ? "Content note: " + b.content_note : ""; ui.contentNote.hidden = !b.content_note;
@@ -154,10 +155,10 @@ function closeDetails(tellServer) {
   ui.details.hidden = true; S.detailsOpen = false; ui.awareness.hidden = true;
   ui.reveal.setAttribute("aria-expanded", "false");
   ui.revealLabel.textContent = "Reveal this book"; ui.revealSub.textContent = "See the title, author and where to read it";
-  if (tellServer && S.source === "catalogue" && S.token) api("/api/event", { token: S.token, event: "book_hidden" });
+  if (tellServer && S.source === "catalogue" && S.token) api("/api/event", { token: S.token, book_token: S.bookKey, event: "book_hidden" });
 }
 function afterReveal(book) {
-  counts.books++; updateCounts(); openDetails(book);
+  openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
   ready.then(() => lib.markBookRevealed(S.source, S.bookKey, book)).catch(() => {});
   ui.awareness.hidden = S.source !== "catalogue";
   setStatus("Book revealed. Your passage has not changed.");
@@ -205,17 +206,17 @@ const startCatalogue = () => act("start", "/api/passage/start", undefined, (d) =
 function onAnother() {
   if (!S.bookKey) return;
   if (S.source === "upload") return anotherUp();
-  act("another", "/api/passage/another", { token: S.token }, (d) => { showPassage(fromApi(d)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
+  act("another", "/api/passage/another", { token: S.token, book_token: S.bookKey }, (d) => { showPassage(fromApi(d)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
 }
 function onSpin() {
   if (!S.bookKey) return;
   if (S.source === "upload") return spinUp();
-  act("spin", "/api/book/spin", { token: S.token }, (d) => { showPassage(fromApi(d)); setStatus(d.notice || "A different book, hidden again. Read on."); });
+  act("spin", "/api/book/spin", { token: S.token, book_token: S.bookKey }, (d) => { showPassage(fromApi(d)); setStatus(d.notice || "A different book, hidden again. Read on."); });
 }
 async function doReveal() {
   if (!S.bookKey) return;
   if (S.source === "upload") { S.up.revealed = S.up.cur.bookId; return afterReveal(upPayload(upBook(S.up.cur.bookId))); }
-  return act("reveal", "/api/book/reveal", { token: S.token }, (d) => afterReveal(d.book));
+  return act("reveal", "/api/book/reveal", { book_token: S.bookKey }, (d) => afterReveal(d.book));
 }
 function onReveal() {
   if (!S.bookKey) return;
@@ -230,7 +231,7 @@ ui.hide.addEventListener("click", () => { onReveal(); ui.reveal.focus(); });
 ui.links.addEventListener("click", (e) => { if (e.target.closest("a")) { counts.links++; updateCounts(); } });
 ui.awareness.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-answer]"); if (!b || !S.token) return;
-  api("/api/event", { token: S.token, event: "awareness_" + b.dataset.answer });
+  api("/api/event", { token: S.token, book_token: S.bookKey, event: "awareness_" + b.dataset.answer });
   ui.awareness.hidden = true; setStatus("Thanks for answering.");
 });
 ui.save.addEventListener("click", async () => {
@@ -242,7 +243,7 @@ ui.save.addEventListener("click", async () => {
     const b = S.book;
     await lib.saveBook({ source: S.source, bookKey: S.bookKey, title: b.title, author: b.author, genres: b.genres || [], description: b.description || "",
       links: b.links || [], credit: b.source_credit || null, isUpload: !!b.is_upload, isDemo: !!b.is_demo, contentNote: b.content_note || null });
-    if (S.source === "catalogue" && S.token) api("/api/event", { token: S.token, event: "book_saved" });
+    if (S.source === "catalogue" && S.token) api("/api/event", { token: S.token, book_token: S.bookKey, event: "book_saved" });
     setStatus("Saved to My Saved Books on this device.");
   }
   refreshSaveButton();
@@ -313,7 +314,14 @@ async function renderSaved() {
     if (b.isUpload) li.append(el("p", "meta", "Your upload. Stored only in this browser."));
     if (b.links?.length) {
       const ul = el("ul", "links");
-      for (const l of b.links) { const x = el("li"), a = el("a", "btn link"); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab")); x.append(a); ul.append(x); }
+      for (const l of b.links) {
+        const x = el("li"), a = el("a", "btn link");
+        // Older saved catalogue links point at a passage token that may be gone; use the stable book token instead.
+        a.href = b.source === "catalogue" && b.bookKey && l.kind ? `/go/${l.kind}/${b.bookKey}` : l.href;
+        a.target = "_blank"; a.rel = "noopener noreferrer";
+        a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab"));
+        x.append(a); ul.append(x);
+      }
       li.append(ul);
     }
     const rm = el("button", "btn quiet", "Remove from saved"); rm.type = "button"; rm.dataset.act = "remove"; li.append(rm);

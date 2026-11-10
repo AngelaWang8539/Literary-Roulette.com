@@ -4,6 +4,8 @@ import hmac
 import json
 import random
 import re
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -85,6 +87,9 @@ class Catalogue:
         self._secret = secret.encode("utf-8") if isinstance(secret, str) else secret
         self.books, self.passages, self.passages_by_book = {}, {}, {}
         self.text_books = set()
+        self._active_books = OrderedDict()
+        self._cache_lock = threading.RLock()
+        self.max_active_books = 2
 
         for b in books:
             if isinstance(b, dict) and isinstance(b.get("id"), str) and (b.get("gutenberg_id") or b.get("text_file")):
@@ -124,29 +129,90 @@ class Catalogue:
                 self.passages[pid] = p
                 self.passages_by_book.setdefault(bid, []).append(p)
 
-        for bid in sorted(self.text_books & set(self.books)):
-            book = self.books[bid]
-            text = (self.texts_dir / _safe_text_name(book)).read_text(encoding="utf-8")
-            split = _split_chinese(text) if self.language == "zh" else textproc.split_passages(text)
-            for i, body in enumerate(split):
-                pid = f"{bid}:{getattr(textproc, 'RULES_VERSION', 'multi-1')}:{i:05d}"
-                # edition_note is editorial/import guidance for maintainers, not a
-                # reader-facing edition label. Never expose it in the reveal panel.
-                gid = book.get("gutenberg_id")
-                source_meta = book.get("source") if isinstance(book.get("source"), dict) else {}
-                public_edition = book.get("source_edition") or book.get("source_name") or source_meta.get("name")
-                source = {"edition": public_edition, "location": None}
-                self.passages[pid] = {"id": pid, "book_id": bid, "text": body, "generated": True, "source": source}
-                self.passages_by_book.setdefault(bid, []).append(self.passages[pid])
-
-        self.book_ids = [bid for bid in self.books if self.passages_by_book.get(bid)]
+        # Verified full texts are indexed as available, but read and split only
+        # when a reader actually selects that title.
+        self.book_ids = [bid for bid in self.books
+                         if self.passages_by_book.get(bid) or bid in self.text_books]
         self._p_tokens = {self.token("p", pid): pid for pid in self.passages}
         self._b_tokens = {self.token("b", bid): bid for bid in self.book_ids}
 
+    def _touch_active(self, bid):
+        self._active_books.pop(bid, None)
+        self._active_books[bid] = None
+        while len(self._active_books) > self.max_active_books:
+            old_bid, _ = self._active_books.popitem(last=False)
+            self._evict_passages(old_bid)
+
+    def _evict_passages(self, bid):
+        # Keep small approved excerpts resident; evict generated full-book passages.
+        existing = self.passages_by_book.get(bid, [])
+        generated = [p for p in existing if p.get("generated")]
+        if not generated:
+            return
+        for passage in generated:
+            self.passages.pop(passage["id"], None)
+            self._p_tokens.pop(self.token("p", passage["id"]), None)
+        retained = [p for p in existing if not p.get("generated")]
+        if retained:
+            self.passages_by_book[bid] = retained
+        else:
+            self.passages_by_book.pop(bid, None)
+            book = self.books.get(bid)
+            if book is not None and "text_url" in book and bid not in self.text_books:
+                # On-demand Gutenberg title: it can be rebuilt from the metadata snapshot,
+                # so do not keep its record, id or token in memory after the text is gone.
+                self.books.pop(bid, None)
+                if bid in self.book_ids:
+                    self.book_ids.remove(bid)
+                self._b_tokens.pop(self.token("b", bid), None)
+
+    def ensure_book_loaded(self, bid):
+        with self._cache_lock:
+            return self._ensure_book_loaded(bid)
+
+    def _ensure_book_loaded(self, bid):
+        """Load one verified local title and retain no more than two full books."""
+        if bid not in self.books:
+            raise KeyError(f"Unknown book: {bid}")
+        existing = self.passages_by_book.get(bid, [])
+        has_generated = any(p.get("generated") for p in existing)
+        if has_generated:
+            if bid in self.text_books or self.books[bid].get("text_url"):
+                self._touch_active(bid)
+            return bid
+        if existing and bid not in self.text_books:
+            return bid  # approved excerpt-only books do not need a full-text load
+        if bid not in self.text_books:
+            raise ValueError(f"No locally verified text is available for {bid}.")
+        text = self._text_path(self.books[bid]).read_text(encoding="utf-8")
+        split = _split_chinese(text) if self.language == "zh" else textproc.split_passages(text)
+        if not split:
+            raise ValueError(f"Verified text for {bid} did not yield readable passages.")
+        book = self.books[bid]
+        source_meta = book.get("source") if isinstance(book.get("source"), dict) else {}
+        public_edition = book.get("source_edition") or book.get("source_name") or source_meta.get("name")
+        generated = []
+        for i, body in enumerate(split):
+            pid = f"{bid}:{getattr(textproc, 'RULES_VERSION', 'multi-1')}:{i:05d}"
+            passage = {"id": pid, "book_id": bid, "text": body, "generated": True,
+                       "source": {"edition": public_edition, "location": None}}
+            generated.append(passage)
+            self.passages[pid] = passage
+            self._p_tokens[self.token("p", pid)] = pid
+        retained = [p for p in self.passages_by_book.get(bid, []) if not p.get("generated")]
+        self.passages_by_book[bid] = retained + generated
+        self._touch_active(bid)
+        return bid
+
     def add_external_book(self, book, text):
+        with self._cache_lock:
+            return self._add_external_book(book, text)
+
+    def _add_external_book(self, book, text):
         """Register one downloaded Gutenberg title and generate its passages."""
         bid = book["id"]
         if bid in self.books and self.passages_by_book.get(bid):
+            self._touch_active(bid)
             return bid
         if not isinstance(text, str) or not text.strip():
             raise ValueError("The selected title did not contain readable text.")
@@ -167,6 +233,7 @@ class Catalogue:
         if bid not in self.book_ids:
             self.book_ids.append(bid)
         self._b_tokens[self.token("b", bid)] = bid
+        self._touch_active(bid)
         return bid
 
     def _text_path(self, book):
@@ -177,14 +244,18 @@ class Catalogue:
             return "no text folder configured"
         entry = self.manifest.get(book["id"])
         if not entry:
-            return "no manifest record for this book"
+            return "no manifest record for this book; run tools/ingest_gutenberg.py to verify its local text"
         if entry.get("verified") is not True:
             return "; ".join(entry.get("problems", ["text not verified"]))
         path = self._text_path(book)
         if not path.is_file():
             return f"cleaned text file {path.name} is missing"
-        if hashlib.sha256(path.read_bytes()).hexdigest() != entry.get("text_sha256"):
-            return "cleaned text changed after verification; rerun the language importer"
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != entry.get("text_sha256"):
+            return "cleaned text changed since verification; rerun the language importer"
         return None
 
     def _rights_ok(self, status, book):
@@ -196,9 +267,28 @@ class Catalogue:
         digest = hmac.new(self._secret, f"{kind}:{ident}".encode("utf-8"), hashlib.sha256)
         return digest.hexdigest()[:12]
 
-    def passage_by_token(self, token):
-        pid = self._p_tokens.get(token) if isinstance(token, str) else None
-        return self.passages.get(pid)
+    def tokens(self, kind, idents):
+        """Same values as token(), but ~3x faster for large batches (reuses one keyed HMAC)."""
+        base = hmac.new(self._secret, digestmod=hashlib.sha256)
+        out = []
+        for ident in idents:
+            h = base.copy()
+            h.update(f"{kind}:{ident}".encode("utf-8"))
+            out.append(h.hexdigest()[:12])
+        return out
+
+    def release_book(self, bid):
+        """Forget one title's full text now (used when the reader spins to another book)."""
+        with self._cache_lock:
+            self._active_books.pop(bid, None)
+            self._evict_passages(bid)
+
+    def passage_by_token(self, token, book_id=None):
+        with self._cache_lock:
+            if book_id:
+                self.ensure_book_loaded(book_id)
+            pid = self._p_tokens.get(token) if isinstance(token, str) else None
+            return self.passages.get(pid)
 
     def book_of(self, passage):
         return self.books[passage["book_id"]]
@@ -214,12 +304,16 @@ class Catalogue:
         return rng.choice(unseen or options)
 
     def pick_first(self, rng=random):
-        bid = rng.choice(self.book_ids)
-        return rng.choice(self.passages_by_book[bid])
+        with self._cache_lock:
+            bid = rng.choice(self.book_ids)
+            self.ensure_book_loaded(bid)
+            return rng.choice(self.passages_by_book[bid])
 
     def pick_other_passage(self, current, seen, rng=random):
-        options = [p for p in self.passages_by_book[current["book_id"]] if p["id"] != current["id"]]
-        return self._pick_unseen(options, seen, rng) if options else None
+        with self._cache_lock:
+            self.ensure_book_loaded(current["book_id"])
+            options = [p for p in self.passages_by_book[current["book_id"]] if p["id"] != current["id"]]
+            return self._pick_unseen(options, seen, rng) if options else None
 
     def pick_other_book(self, current_book_id, seen_book_tokens, rng=random):
         others = [b for b in self.book_ids if b != current_book_id]
@@ -229,7 +323,9 @@ class Catalogue:
         return rng.choice(fresh or others), not fresh
 
     def pick_in_book(self, book_id, seen, rng=random):
-        return self._pick_unseen(self.passages_by_book[book_id], seen, rng)
+        with self._cache_lock:
+            self.ensure_book_loaded(book_id)
+            return self._pick_unseen(self.passages_by_book[book_id], seen, rng)
 
     def links_for(self, book):
         links = book.get("links") if isinstance(book.get("links"), dict) else {}
@@ -259,15 +355,15 @@ class Catalogue:
         license_note = book.get("source_license_note") or "Verify the source edition and local copyright rules before redistribution."
         return {"label": book.get("source_credit") or f"Text source: {provider}", "url": url, "note": license_note}
 
-    def book_payload(self, book, passage):
+    def book_payload(self, book, passage=None):
         pub = book.get("publication") if isinstance(book.get("publication"), dict) else {}
         bits = []
         if pub.get("year"):
             bits.append(f"First published {pub['year']}.")
         if pub.get("publisher"):
             bits.append(f"Publisher: {pub['publisher']}.")
-        src = passage.get("source") if isinstance(passage.get("source"), dict) else {}
-        ptoken = self.passage_token(passage)
+        src = passage.get("source") if isinstance(passage, dict) and isinstance(passage.get("source"), dict) else {}
+        btoken = self.book_token(book)
         return {
             "id": book["id"], "language": book.get("language", self.language),
             "title": book["title"], "author": book["author"],
@@ -279,5 +375,5 @@ class Catalogue:
             "source_credit": self._credit(book), "cover_url": self.cover_url(book),
             "source": {"edition": src.get("edition"), "location": src.get("location")},
             "popularity": book.get("popularity"),
-            "links": [{"kind": k, "label": LINK_LABELS[k], "href": f"/go/{k}/{ptoken}"} for k in self.links_for(book)],
+            "links": [{"kind": k, "label": LINK_LABELS[k], "href": f"/go/{k}/{btoken}"} for k in self.links_for(book)],
         }

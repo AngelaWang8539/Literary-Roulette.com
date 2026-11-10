@@ -230,3 +230,10 @@ html:lang(fr) .btn.is-busy .label::after { content: " (chargement)"; }
   .status { min-height: 0; margin-top: .6rem; }
   .toolbar > * { flex: 1 1 100%; }
 }
+
+/* Popularity badge in the reveal panel */
+.popularity-badge { display: flex; flex-direction: column; gap: .15rem; margin: 0 0 .75rem; padding: .5rem .8rem; border-radius: .6rem; border: 1px solid var(--forest); background: rgba(31, 61, 50, .06); }
+.popularity-badge[hidden] { display: none; }
+.popularity-label { font-weight: 600; color: var(--forest); }
+.popularity-detail { color: inherit; opacity: .8; }
+.popularity-badge.tier-jackpot, .popularity-badge.tier-lucky { background: rgba(176, 132, 38, .14); border-color: #b08426; }

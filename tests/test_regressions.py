@@ -26,6 +26,7 @@ def test_internal_edition_note_is_not_exposed():
         }
         cat = Catalogue([book], [], "test-secret", False, texts_dir=texts, manifest=manifest, language="zh")
         assert cat.book_ids
+        cat.ensure_book_loaded("zh-b014")  # texts are read lazily, only when a title is selected
         passage = cat.passages_by_book["zh-b014"][0]
         payload = cat.book_payload(book, passage)
         assert "文言笔记体" not in str(payload)

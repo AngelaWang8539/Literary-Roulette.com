@@ -68,6 +68,25 @@
       "Livre de démonstration : le texte est fictif et rédigé pour les tests. Les liens affichés sont des espaces réservés, pas de vraies boutiques."],
     ["Genres", "类型", "Genres"],
     ["Where to go next", "接下来去哪里", "Pour aller plus loin"],
+    // ---- reveal panel: link buttons, credit, publication, passage source ----
+    ["Read online", "在线阅读", "Lire en ligne"],
+    ["Borrow", "借阅", "Emprunter"],
+    ["Buy e-book", "购买电子书", "Acheter l’e-book"],
+    ["by {x}", "作者：{x}", "par {x}"],
+    ["Text source: Project Gutenberg eBook #{n}", "文本来源：Project Gutenberg 电子书 #{n}", "Source du texte : Project Gutenberg, livre numérique n° {n}"],
+    ["Text source: {x}", "文本来源：{x}", "Source du texte : {x}"],
+    ["Project Gutenberg records this title as public domain in the USA. Copyright status can differ by country.",
+      "Project Gutenberg 将这本书记录为在美国属于公有领域。各国的版权状况可能不同。",
+      "Project Gutenberg indique que ce titre est dans le domaine public aux États-Unis. Le statut du droit d’auteur peut varier selon les pays."],
+    ["Verify the source edition and local copyright rules before redistribution.",
+      "再分发之前，请核实来源版本和当地的版权规定。",
+      "Vérifiez l’édition source et les règles locales de droit d’auteur avant toute redistribution."],
+    ["First published {y}. Publisher: {p}.", "首次出版于 {y} 年。出版社：{p}。", "Première publication en {y}. Éditeur : {p}."],
+    ["First published {y}.", "首次出版于 {y} 年。", "Première publication en {y}."],
+    ["Publisher: {p}.", "出版社：{p}。", "Éditeur : {p}."],
+    ["This passage: Project Gutenberg eBook #{n}, Passage {k}.", "本段文字：Project Gutenberg 电子书 #{n}，第 {k} 段。", "Ce passage : Project Gutenberg, livre numérique n° {n}, passage {k}."],
+    ["This passage: Project Gutenberg eBook #{n}.", "本段文字：Project Gutenberg 电子书 #{n}。", "Ce passage : Project Gutenberg, livre numérique n° {n}."],
+    ["This passage: Passage {k}.", "本段文字：第 {k} 段。", "Ce passage : passage {k}."],
     ["No reading, borrowing or buying links have been added for this book yet.", "这本书还没有添加阅读、借阅或购买链接。", "Aucun lien de lecture, d’emprunt ou d’achat n’a encore été ajouté pour ce livre."],
     ["Save this book", "收藏这本书", "Enregistrer ce livre"],
     ["Saved. Remove from saved", "已收藏。点击取消收藏", "Enregistré. Retirer des enregistrés"],
@@ -179,6 +198,38 @@
 
   // ---------- compile the table ----------
   const norm = (s) => s.trim().replace(/\s+/g, " ");
+
+  // Common Project Gutenberg bookshelf names shown as genre tags: [English, 简体中文, Français].
+  const SHELVES = [
+    ["Poetry", "诗歌", "Poésie"], ["Novels", "小说", "Romans"], ["Fiction", "小说", "Fiction"],
+    ["Science Fiction", "科幻小说", "Science-fiction"], ["Fantasy", "奇幻", "Fantastique"],
+    ["Adventure", "冒险", "Aventure"], ["Mystery Fiction", "悬疑小说", "Roman policier"],
+    ["Detective Fiction", "侦探小说", "Roman policier"], ["Crime Fiction", "犯罪小说", "Roman noir"],
+    ["Horror", "恐怖", "Horreur"], ["Gothic Fiction", "哥特小说", "Roman gothique"],
+    ["Romance", "爱情小说", "Romance"], ["Historical Fiction", "历史小说", "Roman historique"],
+    ["Humor", "幽默", "Humour"], ["Humour", "幽默", "Humour"], ["Satire", "讽刺文学", "Satire"],
+    ["Children's Literature", "儿童文学", "Littérature jeunesse"], ["Children's Fiction", "儿童小说", "Fiction pour la jeunesse"],
+    ["Plays/Films/Dramas", "戏剧／电影", "Théâtre et cinéma"], ["Drama", "戏剧", "Théâtre"],
+    ["Short Stories", "短篇小说", "Nouvelles"], ["Essays", "散文随笔", "Essais"],
+    ["Philosophy", "哲学", "Philosophie"], ["Biographies", "传记", "Biographies"], ["Autobiographies", "自传", "Autobiographies"],
+    ["History", "历史", "Histoire"], ["Politics", "政治", "Politique"], ["Religion", "宗教", "Religion"],
+    ["Science", "科学", "Sciences"], ["Mathematics", "数学", "Mathématiques"], ["Travel", "旅行", "Voyages"], ["War", "战争", "Guerre"],
+    ["Fairy Tales", "童话", "Contes de fées"], ["Mythology", "神话", "Mythologie"], ["Folklore", "民间传说", "Folklore"],
+    ["Classics of Literature", "文学经典", "Classiques de la littérature"], ["Western Literature", "西方文学", "Littérature occidentale"],
+    ["Best Books Ever Listings", "史上最佳书单", "Les meilleurs livres de tous les temps"], ["Harvard Classics", "哈佛经典", "Harvard Classics"],
+    ["Literature", "文学", "Littérature"], ["American Literature", "美国文学", "Littérature américaine"],
+    ["British Literature", "英国文学", "Littérature britannique"], ["English Literature", "英国文学", "Littérature anglaise"],
+    ["French Literature", "法国文学", "Littérature française"], ["German Literature", "德国文学", "Littérature allemande"],
+    ["Russian Literature", "俄国文学", "Littérature russe"], ["Chinese Literature", "中国文学", "Littérature chinoise"],
+    ["FR Littérature", "法语文学", "FR Littérature"], ["FR Poésie", "法语诗歌", "FR Poésie"],
+    ["FR Théâtre", "法语戏剧", "FR Théâtre"], ["FR Histoire", "法语历史", "FR Histoire"],
+  ];
+  for (const [en, zh, fr] of SHELVES) {
+    ENTRIES.push(["Category: " + en, "类别：" + zh, "Catégorie : " + fr]);
+    ENTRIES.push([en, zh, fr]);
+  }
+  ENTRIES.push(["Category: {x}", "类别：{x}", "Catégorie : {x}"]); // any other shelf keeps its own name
+
   const exact = { zh: new Map(), fr: new Map() };
   const patterns = { zh: [], fr: [] };
   for (const [en, zh, fr] of ENTRIES) {

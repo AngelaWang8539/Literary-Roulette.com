@@ -254,6 +254,7 @@ def reload_pool_if_changed(pool, catalogues: dict, *, force: bool = False) -> bo
         state["_lr_loaded_mtime_ns"] = mtime_ns
         pool.__dict__.update(state)
         pool.attach_popularity(catalogues)
+        pool.prewarm(catalogues)
         return True
 
 

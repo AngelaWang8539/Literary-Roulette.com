@@ -45,6 +45,43 @@ def _rank(records):
         record["popularity_top_percent"] = max(1, min(100, math.ceil(rank * 100 / total))) if total else 100
 
 
+def _popularity_text(language, tier, rank, total, downloads):
+    """Reader-facing ranking text in the reader's language (en, fr, zh)."""
+    if language == "fr":
+        n = lambda v: f"{v:,}".replace(",", "\u202f")
+        label = {
+            "jackpot": "Jackpot ! Un favori du top 1 % de Project Gutenberg !",
+            "lucky": "Belle trouvaille ! Parmi les 10 % les plus téléchargés !",
+            "hidden-gem": "Perle rare ! Parmi les 10 % les moins téléchargés — envie d’explorer ?",
+            "discovery": f"Une découverte · n° {n(rank)} par téléchargements sur les 30 derniers jours",
+        }[tier]
+        detail = (f"Rang n° {n(rank)} sur {n(total)} titres français indexés · "
+                  f"environ {n(downloads)} téléchargements sur les 30 derniers jours")
+        note = ("D’après les téléchargements approximatifs de Project Gutenberg sur les 30 derniers jours ; "
+                "il s’agit de popularité, pas de qualité littéraire.")
+    elif language == "zh":
+        label = {
+            "jackpot": "头奖！Project Gutenberg 前 1% 的热门读物！",
+            "lucky": "幸运发现！下载量位列前 10%！",
+            "hidden-gem": "遗珠！下载量最低的 10% 之一——想探索一下吗？",
+            "discovery": f"新发现 · 近 30 天下载量排名第 {rank:,} 位",
+        }[tier]
+        detail = f"在已收录的 {total:,} 种中文书籍中排名第 {rank:,} · 近 30 天约 {downloads:,} 次下载"
+        note = "依据 Project Gutenberg 近 30 天的大致下载量；这代表受欢迎程度，而非文学价值。"
+    else:
+        label = {
+            "jackpot": "Jackpot! A top 1% Gutenberg favourite!",
+            "lucky": "Lucky find! Top 10% most downloaded!",
+            "hidden-gem": "Hidden gem alert! Among the least-downloaded 10% — would you like to explore?",
+            "discovery": f"A new discovery · ranked #{rank:,} by downloads in the last 30 days",
+        }[tier]
+        name = LANGUAGE_LABELS.get(language, language)
+        detail = f"Rank #{rank:,} of {total:,} indexed {name} titles · {downloads:,} approximate downloads in the last 30 days"
+        note = ("Based on Project Gutenberg's approximate downloads in the previous 30 days; "
+                "this is popularity, not literary quality.")
+    return label, detail, note
+
+
 class GutendexPool:
     def __init__(self, catalog_path, cache_dir):
         self.catalog_path, self.cache_dir = Path(catalog_path), Path(cache_dir)
@@ -55,6 +92,11 @@ class GutendexPool:
         self.is_partial_snapshot = False
         self.partial_reason = None
         self._lock = threading.Lock()
+        self._rows_cache = {}          # language -> (rows, by_token); built once per metadata snapshot
+        self._rows_lock = threading.Lock()
+        self.max_cache_books = int(os.environ.get("LR_TEXT_CACHE_BOOKS", "6"))
+        self.max_cache_bytes = int(float(os.environ.get("LR_TEXT_CACHE_MB", "32")) * 1024 * 1024)
+        self.cache_max_age_seconds = 14 * 24 * 60 * 60
         try:
             data = json.loads(self.catalog_path.read_text(encoding="utf-8"))
             self.snapshot = data if isinstance(data, dict) else {}
@@ -74,6 +116,8 @@ class GutendexPool:
             self.load_error = "Project Gutenberg metadata has not been synced yet."
         except (OSError, ValueError, TypeError) as exc:
             self.load_error = f"Project Gutenberg metadata could not be read: {exc}"
+        # Also clean up leftovers from older runs when the server starts.
+        self._prune_cache()
 
     def count(self, language):
         return len(self.records.get(language, []))
@@ -87,25 +131,20 @@ class GutendexPool:
         rank = int(record.get("popularity_rank") or 0)
         total = int(record.get("popularity_total") or self.count(language))
         downloads = int(record.get("download_count") or 0)
-        language_name = LANGUAGE_LABELS.get(language, language)
-
         # Extreme labels are only meaningful with a reasonably sized collection.
         if total >= 100 and pct <= 1:
             tier = "jackpot"
-            label = "Jackpot! A top 1% Gutenberg favourite!"
         elif total >= 100 and pct <= 10:
             tier = "lucky"
-            label = "Lucky find! Top 10% most downloaded!"
         elif total >= 100 and pct >= 91:
             tier = "hidden-gem"
-            label = "Hidden gem alert! Among the least-downloaded 10% — would you like to explore?"
         else:
             tier = "discovery"
-            label = f"A new discovery · ranked #{rank:,} by downloads in the last 30 days"
+        label, detail, note = _popularity_text(language, tier, rank, total, downloads)
 
         return {
             "tier": tier, "label": label,
-            "detail": f"Rank #{rank:,} of {total:,} indexed {language_name} titles · {downloads:,} approximate downloads in the last 30 days",
+            "detail": detail, "note": note,
             "rank": rank, "total": total, "downloads_30d": downloads, "top_percent": pct,
             "snapshot_date": self.snapshot.get("generated_at"),
             "source_url": f"https://www.gutenberg.org/ebooks/{record['id']}",
@@ -128,11 +167,11 @@ class GutendexPool:
                         missing.append({"language": language, "title": book.get("title"), "gutenberg_id": int(gid)})
         return missing
 
-    def _book_record(self, record, language):
+    def _book_record(self, record, language, require_text_url=True):
         gid = int(record["id"])
         formats = record.get("formats") if isinstance(record.get("formats"), dict) else {}
         text_url = _plain_text_url(formats)
-        if not text_url: raise RuntimeError(f"Gutenberg eBook #{gid} has no trusted plain-text URL.")
+        if require_text_url and not text_url: raise RuntimeError(f"Gutenberg eBook #{gid} has no trusted plain-text URL.")
         authors = [a.get("name", "") for a in (record.get("authors") or []) if isinstance(a, dict) and a.get("name")]
         author = ", ".join(authors) or "Author not listed"
         genres = record.get("bookshelves") or record.get("subjects") or []
@@ -163,9 +202,15 @@ class GutendexPool:
     def _fetch_text(self, book):
         language, gid = book["language"], int(book["gutenberg_id"])
         cache = self._cache_path(language, gid)
-        if cache.is_file(): return cache.read_text(encoding="utf-8")
+        if cache.is_file():
+            os.utime(cache, None)
+            return cache.read_text(encoding="utf-8")
         with self._lock:
-            if cache.is_file(): return cache.read_text(encoding="utf-8")
+            if cache.is_file():
+                os.utime(cache, None)
+                return cache.read_text(encoding="utf-8")
+            if not book.get("text_url"):
+                raise RuntimeError(f"Project Gutenberg eBook #{gid} has no trusted plain-text download URL.")
             req = urllib.request.Request(book["text_url"], headers={
                 "User-Agent": "LiteraryRoulette/0.5 (on-demand text reader)",
                 "Accept-Encoding": "identity",
@@ -221,6 +266,7 @@ class GutendexPool:
             tmp = cache.with_suffix(".txt.tmp")
             tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, cache)
+            self._prune_cache()
             return text
 
     def _candidate_records(self, language, cat):
@@ -237,50 +283,139 @@ class GutendexPool:
             rows.append({"book_id": bid, "record": None})
         return rows
 
+    def _rows(self, language, cat):
+        """Selectable books for one language as (book_id, token, record) rows, plus a token index.
+
+        Built once per metadata snapshot. Spinning and revealing then cost a few dictionary
+        lookups instead of re-scanning (and re-hashing) the whole Gutenberg catalogue.
+        """
+        cached = self._rows_cache.get(language)
+        if cached is not None:
+            return cached
+        with self._rows_lock:
+            cached = self._rows_cache.get(language)
+            if cached is not None:
+                return cached
+            local_by_gid, rows = {}, []
+            for bid, book in cat.books.items():
+                if "text_url" in book:      # an on-demand title loaded earlier; rebuilt from its record below
+                    continue
+                if bid not in cat.book_ids and not cat.passages_by_book.get(bid):
+                    continue
+                gid = book.get("gutenberg_id")
+                if str(gid or "").isdigit():
+                    local_by_gid[int(gid)] = bid
+                else:
+                    rows.append([bid, None])
+            matched = set()
+            for record in self.records.get(language, []):
+                gid = int(record["id"])
+                local_id = local_by_gid.get(gid)
+                if local_id:
+                    matched.add(local_id)
+                rows.append([local_id or f"pg-{language}-{gid}", record])
+            for bid in set(local_by_gid.values()) - matched:
+                rows.append([bid, None])
+            tokens = cat.tokens("b", [r[0] for r in rows])
+            built = [(r[0], tok, r[1]) for r, tok in zip(rows, tokens)]
+            result = (built, {row[1]: row for row in built})
+            self._rows_cache[language] = result
+            return result
+
+    def prewarm(self, catalogues):
+        """Build the selection index at start-up / after a metadata refresh, not on a reader's click."""
+        for language, cat in catalogues.items():
+            self._rows(language, cat)
+
     def available_count(self, language, cat):
-        return len(self._candidate_records(language, cat))
+        return len(self._rows(language, cat)[0])
+
+    def _prune_cache(self):
+        """Keep only a few recent on-demand texts on disk (default 6 books / 32 MB)."""
+        now = time.time()
+        files = [p for p in self.cache_dir.glob("*/*.txt") if p.is_file()]
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        total_bytes = kept = 0
+        for path in files:
+            try:
+                size = path.stat().st_size
+                expired = now - path.stat().st_mtime > self.cache_max_age_seconds
+                over = kept >= self.max_cache_books or total_bytes + size > self.max_cache_bytes
+                if expired or over:
+                    path.unlink(missing_ok=True)
+                else:
+                    kept += 1
+                    total_bytes += size
+            except OSError:
+                continue
+        for folder in self.cache_dir.glob("*"):
+            if folder.is_dir():
+                try: folder.rmdir()
+                except OSError: pass
+
+    def book_for_token(self, language, cat, token):
+        """Resolve a book from metadata only (one dict lookup); never loads its full text."""
+        bid = cat._b_tokens.get(token)
+        if bid:
+            book = cat.books.get(bid)
+            if book:
+                return book
+        row = self._rows(language, cat)[1].get(token)
+        if not row:
+            return None
+        bid, _token, record = row
+        book = cat.books.get(bid)
+        if book:
+            return book
+        return self._book_record(record, language, require_text_url=False) if record else None
+
+    def ensure_book_loaded(self, language, cat, book):
+        """Load only the requested title into the catalogue's two-book memory LRU."""
+        bid = book["id"]
+        if cat.passages_by_book.get(bid):
+            cat.ensure_book_loaded(bid)
+            return bid
+        if bid in cat.text_books:
+            return cat.ensure_book_loaded(bid)
+        return cat.add_external_book(book, self._fetch_text(book))
 
     def restore_cached_books(self, language, cat):
-        """Rebuild cached books in memory so another server worker can resolve the same token."""
-        folder = self.cache_dir / language
-        if not folder.is_dir(): return
-        for cache in folder.glob("pg*.txt"):
-            match = re.fullmatch(r"pg(\d+)\.txt", cache.name)
-            if not match: continue
-            record = self.by_gid.get(language, {}).get(int(match.group(1)))
-            if not record: continue
-            gid = int(record["id"])
-            exists = any(str(b.get("gutenberg_id") or "") == str(gid) and cat.passages_by_book.get(bid)
-                         for bid, b in cat.books.items())
-            if exists: continue
-            try:
-                book = self._book_record(record, language)
-                cat.add_external_book(book, cache.read_text(encoding="utf-8"))
-            except Exception:
-                continue
+        """Deprecated compatibility shim; deliberately does not restore all cached texts."""
+        return None
 
     def pick_passage(self, language, cat, rng=random, seen_book_tokens=None, current_book_id=None):
-        seen_book_tokens = set(seen_book_tokens or ())
-        rows = self._candidate_records(language, cat)
+        seen_book_tokens = seen_book_tokens or ()
+        rows = self._rows(language, cat)[0]
         if not rows: return None, False
-        def token_and_id(row):
-            bid = row.get("book_id") or f"pg-{language}-{int(row['record']['id'])}"
-            return cat.token("b", bid), bid
-        fresh = [r for r in rows if token_and_id(r)[0] not in seen_book_tokens and token_and_id(r)[1] != current_book_id]
+
+        def usable(row):
+            return row[1] not in seen_book_tokens and row[0] != current_book_id
+
+        chosen = None
+        for _ in range(24):                 # a handful of random draws is enough for a big catalogue
+            row = rng.choice(rows)
+            if usable(row):
+                chosen = row
+                break
         restarted = False
-        choices = fresh
-        if not choices:
-            choices = [r for r in rows if token_and_id(r)[1] != current_book_id]
-            restarted = True
-        if not choices: return None, False
-        selected = rng.choice(choices)
-        bid, record = selected.get("book_id"), selected.get("record")
+        if chosen is None:                  # tiny catalogue, or nearly everything already seen
+            fresh = [r for r in rows if usable(r)]
+            if not fresh:
+                fresh = [r for r in rows if r[0] != current_book_id]
+                restarted = True
+            if not fresh: return None, False
+            chosen = rng.choice(fresh)
+
+        bid, _token, record = chosen
         if record:
-            if not bid:
+            book = cat.books.get(bid)
+            if book is None:
                 book = self._book_record(record, language)
                 bid = cat.add_external_book(book, self._fetch_text(book))
             else:
-                cat.books[bid]["popularity"] = self.popularity_payload(record, language)
-        passages = cat.passages_by_book.get(bid, [])
-        if not passages: raise RuntimeError(f"No usable passages were generated for {bid}.")
-        return rng.choice(passages), restarted
+                book["popularity"] = self.popularity_payload(record, language)
+        if bid in cat.books:
+            self.ensure_book_loaded(language, cat, cat.books[bid])
+        if not cat.passages_by_book.get(bid):
+            raise RuntimeError(f"No usable passages were generated for {bid}.")
+        return cat.pick_in_book(bid, set(), rng), restarted
