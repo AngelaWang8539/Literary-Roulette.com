@@ -6,22 +6,22 @@
   <title>{% block title %}Literary Roulette{% endblock %}</title>
   <meta name="description" content="Read a random passage first. Find out which book it came from when you choose to.">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta name="theme-color" content="#ffffff">
 </head>
-<body>
+<body data-language="{{ language|default('en') }}">
   <a class="skip" href="#main">Skip to main content</a>
   <header class="site-header">
     <a class="brand" href="{{ url_for('index') }}">
       <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true" focusable="false"><path d="M16 8c-3-2.4-7-3-11-2v17c4-1 8-.4 11 2 3-2.4 7-3 11-2V6c-4-1-8-.4-11 2zM16 8v17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       <span>Literary Roulette</span>
     </a>
-    <p class="tagline">One spin. One passage. One unexpected discovery.</p>
+    <p class="tagline">A library of stories. One draw chooses the book; a passage reveals it.</p>
     <nav class="main-nav" aria-label="Main">
       <a href="#" data-view="">Home</a>
       <a href="{{ url_for('index') }}#history" data-view="#history">My History</a>
       <a href="{{ url_for('index') }}#saved" data-view="#saved">My Saved Books</a>
       <a href="{{ url_for('about') }}">About</a>
     </nav>
-    <!-- Layout reserved for the future multilingual-catalogue patch. Only English works in this version. -->
     <div class="language-bar"></div>
   </header>
   <main id="main">{% block main %}{% endblock %}</main>
@@ -31,6 +31,7 @@
     <p>Rights and content contact: {{ site.contact_email }}</p>
   </footer>
   <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/language-switcher.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

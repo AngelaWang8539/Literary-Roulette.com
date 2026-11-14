@@ -4,6 +4,8 @@ import { createLibrary, idbAdapter, memoryAdapter } from "./storage.js";
 import { readEbook, UploadError } from "./ebook.js";
 import { splitPassages } from "./chunker.js";
 import * as roulette from "./roulette.js";
+import * as Librarian from "./librarian.js";
+import { createTicketPouch } from "./tickets.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -21,6 +23,7 @@ const buttons = { start: ui.start, another: ui.another, reveal: ui.reveal, spin:
 const counts = { passages: 0, books: 0, links: 0 };
 const busy = new Set();
 let latest = 0;
+const LANGUAGE = document.body.dataset.language || "en";
 
 // What is on screen right now.
 const S = { source: "catalogue", token: null, bookKey: null, passageKey: null, book: null, detailsOpen: false,
@@ -34,8 +37,11 @@ const ready = (async () => {
     const adapter = idbAdapter();
     await adapter.getAll("history");
     lib = createLibrary(adapter);
-  } catch {
+  } catch (err) {
+    console.warn("Literary Roulette: local storage is unavailable:", err);
     lib = createLibrary(memoryAdapter());
+    const reason = $("storage-reason");
+    if (reason) reason.textContent = " (" + ((err && (err.name || err.message)) || "unknown reason") + ")";
     $("storage-warning").hidden = false;
   }
 })();
@@ -47,7 +53,13 @@ function setStatus(message, kind) {
 }
 function updateCounts() { $("count-passages").textContent = counts.passages; $("count-books").textContent = counts.books; $("count-links").textContent = counts.links; }
 function setPanelEnabled(on) { [ui.another, ui.reveal, ui.spin].forEach((b) => { b.disabled = !on; }); }
-function lock(name, on) { buttons[name].setAttribute("aria-disabled", on ? "true" : "false"); buttons[name].classList.toggle("is-busy", on); }
+const slowTimers = {};
+function lock(name, on) {
+  const b = buttons[name];
+  b.setAttribute("aria-disabled", on ? "true" : "false"); b.classList.toggle("is-busy", on);
+  clearTimeout(slowTimers[name]);
+  if (on) slowTimers[name] = setTimeout(() => b.classList.add("is-slow"), 1000); else b.classList.remove("is-slow");   // "(loading)" only if it really is slow
+}
 async function api(path, body) {
   try {
     const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -55,34 +67,97 @@ async function api(path, body) {
   } catch { return { ok: false, code: "network", message: "Could not reach the site. Check your connection and try again." }; }
 }
 
+function logEvent(event, extra = {}) {
+  // Fire and forget: analytics must never slow a click or surface an error to the reader.
+  try {
+    fetch("/api/event", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, language: LANGUAGE, book_token: S.bookKey, ticket: S.ticket || undefined, ...extra }) }).catch(() => {});
+  } catch { /* ignore */ }
+}
+const pouch = createTicketPouch({ api, language: LANGUAGE });
+
 // Run one server action. Only that action is locked; the other buttons stay usable.
-async function act(name, path, body, onOk) {
+// The librarian drawing appears only if the task is still running after one second.
+async function act(name, mode, message, task, onOk) {
   if (busy.has(name)) return;
   busy.add(name); lock(name, true);
   const mine = ++latest;
   setStatus("Loading\u2026");
-  const data = await api(path, body);
+  const op = Librarian.begin(mode, message);
+  let data;
+  try { data = await task(op); } catch { data = { ok: false, code: "network", message: "Could not reach the site. Check your connection and try again." }; }
   busy.delete(name); lock(name, false);
-  if (mine !== latest) return;
+  if (mine !== latest) { op.done(); return; }
   if (!data.ok) {
     const soft = data.code === "no_other_passage" || data.code === "only_one_book";
-    setStatus(data.message || "Something went wrong. Please try again.", soft ? "note" : "error");
-    if (data.code === "empty_catalogue") { ui.text.textContent = data.message; setPanelEnabled(false); ui.start.hidden = false; }
-    if (data.code === "unknown_passage") ui.start.hidden = false; // keep the text readable, offer a fresh spin
+    const message_ = data.message || "Something went wrong. Please try again.";
+    soft ? op.done() : op.fail(message_);
+    setStatus(message_, soft ? "note" : "error");
+    if (data.code === "empty_shelf") { ui.text.textContent = message_; setPanelEnabled(false); ui.start.hidden = false; }
+    if (data.code === "unknown_book") ui.start.hidden = false; // keep the text readable, offer a fresh spin
     return;
   }
+  op.done();
   onOk(data);
 }
 
+// The wait that ends in a real surprise: a uniform random pick from the whole catalogue. Stage names, the draw
+// number and the percentage all come from the server (or the real steps of this page), never from a timer.
+const fmt = (n) => Number(n || 0).toLocaleString(document.documentElement.lang || undefined);
+const STAGE_MODE = { queued: "catalogue", fetching: "load", cleaning: "import", indexing: "import" };
+async function drawWhenReady(op) {
+  await oceanReady;
+  let announced = false;
+  const res = await pouch.next({
+    // First run: the catalogue is being opened. The wait is certain, so the cart appears at once with REAL progress.
+    onOpening: (progress) => {
+      op.show();
+      op.update(progress.message || "Opening the catalogue\u2026", { mode: "catalogue", percent: typeof progress.percent === "number" ? progress.percent : undefined });
+    },
+    // A cold book is being prepared: the wait is certain too. Stage names and percentages come from the server.
+    onProgress: (p) => {
+      if (!p) return;
+      op.show();
+      const mode = STAGE_MODE[p.stage] || "load";
+      const percent = p.stage === "queued" ? 25 : Math.min(95, 25 + Math.round(p.percent * 0.7));
+      const text = p.stage === "queued" ? `Drawing number ${fmt(p.drawNumber)} of ${fmt(p.total)}` : (p.message || "Fetching this edition");
+      op.update(text, { mode, percent });
+      announced = true;
+    },
+  });
+  if (res.ok && pouch.info.mode === "starter") setTimeout(() => setStatus("The catalogue could not be opened, so this is a book from the small starter shelf. The librarian keeps trying.", "note"), 0);
+  return res;
+}
+
+// ---------- the ocean line: what is waiting, and how much of it you have met ----------
+const ocean = { total: 0, mode: "ocean", met: new Set() };
+let oceanReady = Promise.resolve();
+function renderOcean() {
+  const line = document.getElementById("ocean-line"); if (!line) return;
+  if (ocean.mode === "opening") {
+    line.textContent = "The librarian is opening the catalogue of Project Gutenberg\u2026";
+  } else if (ocean.mode === "starter") {
+    line.textContent = "The catalogue could not be opened right now, so a small starter shelf is open. The librarian will keep trying.";
+  } else if (ocean.total) {
+    line.textContent = `A library of ${fmt(ocean.total)} stories. One draw chooses the book; its name stays hidden.` + (ocean.met.size ? ` You have met ${fmt(ocean.met.size)}.` : "");
+  }
+}
+async function loadOcean() {
+  try {
+    const r = await (await fetch(`/api/ocean?language=${encodeURIComponent(LANGUAGE)}`)).json();
+    if (r.ok) { ocean.total = r.total; ocean.mode = r.mode; pouch.info.total = r.total; renderOcean(); }
+    if (r.ok && r.mode !== "ocean") setTimeout(loadOcean, 2000);     // keep checking until the catalogue opens
+  } catch { /* the ocean line is a nicety; reading never depends on it */ }
+}
+
 // ---------- showing a passage ----------
-const fromApi = (d) => ({ source: "catalogue", token: d.token, bookKey: d.book_token, passageKey: d.token, text: d.text,
-  notes: [d.content_warning && "Content note: " + d.content_warning, d.spoiler_level && d.spoiler_level !== "none" && "Spoiler level: " + d.spoiler_level].filter(Boolean), book: d.book || null });
+const fromApi = (d, book = null) => ({ source: "catalogue", token: d.token, ticket: d.ticket, bookKey: d.book_token, passageKey: d.token, text: d.text, notes: [], book, raw: d });
 
 function showPassage(p, { record = true } = {}) {
-  Object.assign(S, { source: p.source, token: p.token || null, bookKey: p.bookKey, passageKey: p.passageKey });
+  Object.assign(S, { source: p.source, token: p.token || null, ticket: p.ticket || null, bookKey: p.bookKey, passageKey: p.passageKey });
   ui.start.hidden = true;
   ui.text.textContent = p.text;
-  if (!reduceMotion()) { ui.text.classList.remove("swap"); void ui.text.offsetWidth; ui.text.classList.add("swap"); }
+  ui.text.scrollTop = 0; ui.text.closest(".passage-scroll")?.scrollTo(0, 0);
   ui.note.textContent = (p.notes || []).join(". "); ui.note.hidden = !(p.notes && p.notes.length);
   ui.banner.hidden = p.source !== "upload";
   const radio = document.querySelector(`input[name=source][value=${p.source}]`); if (radio) radio.checked = true;
@@ -90,6 +165,7 @@ function showPassage(p, { record = true } = {}) {
   if (p.book) openDetails(p.book); else closeDetails(false);
   if (record) {
     counts.passages++; updateCounts();
+    if (p.source === "catalogue" && p.raw) { pouch.shown(p.raw); logEvent("passage_displayed"); ocean.met.add(p.bookKey); renderOcean(); }
     ready.then(async () => {
       await lib.addHistory({ source: p.source, bookKey: p.bookKey, passageKey: p.passageKey, text: p.text });
       if (p.book) await lib.markBookRevealed(p.source, p.bookKey, p.book);
@@ -155,7 +231,7 @@ function closeDetails(tellServer) {
   ui.details.hidden = true; S.detailsOpen = false; ui.awareness.hidden = true;
   ui.reveal.setAttribute("aria-expanded", "false");
   ui.revealLabel.textContent = "Reveal this book"; ui.revealSub.textContent = "See the title, author and where to read it";
-  if (tellServer && S.source === "catalogue" && S.token) api("/api/event", { token: S.token, book_token: S.bookKey, event: "book_hidden" });
+  if (tellServer && S.source === "catalogue" && S.bookKey) logEvent("book_hidden");
 }
 function afterReveal(book) {
   openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
@@ -202,21 +278,28 @@ function spinUp() {
 }
 
 // ---------- the three actions ----------
-const startCatalogue = () => act("start", "/api/passage/start", undefined, (d) => { showPassage(fromApi(d)); setStatus("Your passage is ready. Choose any option."); });
+const startCatalogue = () => { pouch.reset(); S.book = null; return act("start", "catalogue", "Opening the catalogue", drawWhenReady,
+  (res) => { showPassage(fromApi(res.ticket)); setStatus("Your passage is ready. Choose any option."); }); };
 function onAnother() {
   if (!S.bookKey) return;
   if (S.source === "upload") return anotherUp();
-  act("another", "/api/passage/another", { token: S.token, book_token: S.bookKey }, (d) => { showPassage(fromApi(d)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
+  logEvent("another_passage_requested");
+  const keepBook = S.detailsOpen && S.book ? { ...S.book, source: { ...(S.book.source || {}), location: null } } : null;
+  act("another", "load", "Finding another passage\u2026", () => pouch.another({ book_token: S.bookKey, ticket: S.ticket, token: S.token }),
+    (d) => { showPassage(fromApi(d, keepBook)); setStatus("New passage from the same book." + (S.detailsOpen ? " Book details are still showing." : "")); });
 }
 function onSpin() {
   if (!S.bookKey) return;
   if (S.source === "upload") return spinUp();
-  act("spin", "/api/book/spin", { token: S.token, book_token: S.bookKey }, (d) => { showPassage(fromApi(d)); setStatus(d.notice || "A different book, hidden again. Read on."); });
+  logEvent("another_book_requested");
+  act("spin", "load", "Fetching another book\u2026", drawWhenReady,
+    (res) => { showPassage(fromApi(res.ticket)); setStatus("A different book, hidden again. Read on."); });
 }
 async function doReveal() {
   if (!S.bookKey) return;
   if (S.source === "upload") { S.up.revealed = S.up.cur.bookId; return afterReveal(upPayload(upBook(S.up.cur.bookId))); }
-  return act("reveal", "/api/book/reveal", { book_token: S.bookKey }, (d) => afterReveal(d.book));
+  return act("reveal", "load", "Looking up the book\u2026",
+    () => api("/api/book/reveal", { language: LANGUAGE, book_token: S.bookKey, ticket: S.ticket || undefined }), (d) => afterReveal(d.book));
 }
 function onReveal() {
   if (!S.bookKey) return;
@@ -230,8 +313,8 @@ ui.reveal.addEventListener("click", onReveal);
 ui.hide.addEventListener("click", () => { onReveal(); ui.reveal.focus(); });
 ui.links.addEventListener("click", (e) => { if (e.target.closest("a")) { counts.links++; updateCounts(); } });
 ui.awareness.addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-answer]"); if (!b || !S.token) return;
-  api("/api/event", { token: S.token, book_token: S.bookKey, event: "awareness_" + b.dataset.answer });
+  const b = e.target.closest("button[data-answer]"); if (!b || !S.bookKey) return;
+  logEvent("awareness_" + b.dataset.answer);
   ui.awareness.hidden = true; setStatus("Thanks for answering.");
 });
 ui.save.addEventListener("click", async () => {
@@ -243,7 +326,7 @@ ui.save.addEventListener("click", async () => {
     const b = S.book;
     await lib.saveBook({ source: S.source, bookKey: S.bookKey, title: b.title, author: b.author, genres: b.genres || [], description: b.description || "",
       links: b.links || [], credit: b.source_credit || null, isUpload: !!b.is_upload, isDemo: !!b.is_demo, contentNote: b.content_note || null });
-    if (S.source === "catalogue" && S.token) api("/api/event", { token: S.token, book_token: S.bookKey, event: "book_saved" });
+    if (S.source === "catalogue" && S.bookKey) logEvent("book_saved");
     setStatus("Saved to My Saved Books on this device.");
   }
   refreshSaveButton();
@@ -351,6 +434,7 @@ async function renderUploads() {
 $("u-file").addEventListener("change", async (e) => {
   const file = e.target.files[0]; if (!file) return;
   upStatus("Reading your book on this device\u2026");
+  const op = Librarian.begin("import", "Indexing your book\u2026");
   await new Promise((r) => setTimeout(r, 30)); // let the message appear before the heavy work
   try {
     const book = await readEbook(file);
@@ -360,7 +444,9 @@ $("u-file").addEventListener("change", async (e) => {
     await lib.addUpload({ title: book.title, author: book.author, fileName: file.name, size: file.size, passages });
     upStatus(`Added \u201c${book.title}\u201d with about ${passages.length} passages. It is stored only in this browser.`);
     await renderUploads();
+    op.done();
   } catch (err) {
+    op.fail("That file could not be read.");
     upStatus(err instanceof UploadError ? err.message : "Something went wrong while reading this file. It may be damaged or too large for your browser.", "error");
   }
   e.target.value = "";
@@ -392,4 +478,5 @@ function route() {
 }
 addEventListener("hashchange", route);
 route();
+oceanReady = loadOcean();
 startCatalogue();

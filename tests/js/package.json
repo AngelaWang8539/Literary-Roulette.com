@@ -1,0 +1,8 @@
+{
+ "name": "lr-js-tests",
+ "private": true,
+ "description": "Optional: npm install here to run the IndexedDB tests",
+ "devDependencies": {
+  "fake-indexeddb": "^6.0.0"
+ }
+}

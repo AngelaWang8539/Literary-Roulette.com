@@ -26,7 +26,7 @@
         const option = document.createElement("option");
         option.value = item.code;
         const label = labels[item.code] || item.label;
-        option.textContent = `${label} · ${item.ready_books} ready`;
+        option.textContent = `${label} · ${Number(item.ready_books).toLocaleString()} books`;
         select.appendChild(option);
       }
       select.value = data.active || "en";

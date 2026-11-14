@@ -46,8 +46,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
 }
 .card-label { margin: 0 0 1rem; font-family: var(--sans); font-size: .9rem; font-weight: 600; color: var(--muted); }
 .passage-text { margin: 0; font-family: var(--serif); font-size: clamp(1.2rem, 2.2vw, 1.5rem); line-height: 1.75; max-width: 34em; }
-.passage-text.swap { animation: turn .28s ease-out; }
-@keyframes turn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .passage-note { margin: 1rem 0 0; font-size: .92rem; color: var(--warn); border-left: 3px solid var(--warn); padding-left: .6rem; }
 .flourish { display: block; width: 120px; margin: 1.75rem 0 0; color: var(--line); }
 .start { margin-top: 1.25rem; }
@@ -68,7 +66,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
 .btn .sub { font-size: .85rem; font-weight: 400; opacity: .9; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.is-busy { cursor: progress; }
-.btn.is-busy .label::after { content: " (loading)"; font-weight: 400; }
+.btn.is-slow .label::after { content: " (loading)"; font-weight: 400; }
 .btn.start { width: auto; background: var(--forest); color: #fff; font-weight: 650; }
 .btn.quiet { width: auto; min-height: 44px; margin-top: 1rem; }
 .btn.link { align-items: flex-start; gap: 0; }
@@ -84,7 +82,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
 .journey dt { font-size: .8rem; color: var(--muted); }
 .journey dd { margin: 0; font-family: var(--serif); font-size: 1.5rem; color: var(--forest); }
 
-.details { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1.5rem; margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); box-shadow: 0 6px 18px rgba(60, 50, 20, .06); animation: turn .28s ease-out; }
+.details { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1.5rem; margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); box-shadow: 0 6px 18px rgba(60, 50, 20, .06); }
 .details[hidden] { display: none; }
 .cover { width: 150px; aspect-ratio: 2 / 3; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: linear-gradient(160deg, var(--forest), var(--forest-deep)); }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
@@ -116,9 +114,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
   .cover { width: 110px; }
   .brand { font-size: 1.5rem; }
   .links li { max-width: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .passage-text.swap, .details { animation: none; }
 }
 
 /* ---- 0.2: header nav, views, history, saved, upload ---- */
@@ -188,8 +183,8 @@ input[type=search], select, input[type=file] { font: inherit; padding: .55rem .7
 .language-bar:empty { display: none; }
 
 
-html:lang(zh-Hans) .btn.is-busy .label::after { content: "（加载中）"; }
-html:lang(fr) .btn.is-busy .label::after { content: " (chargement)"; }
+html:lang(zh-Hans) .btn.is-slow .label::after { content: "（加载中）"; }
+html:lang(fr) .btn.is-slow .label::after { content: " (chargement)"; }
 
 /* ---- 0.4: phone layout (header menu + one-screen reading layout) ---- */
 .menu-toggle { display: none; }
@@ -237,3 +232,65 @@ html:lang(fr) .btn.is-busy .label::after { content: " (chargement)"; }
 .popularity-label { font-weight: 600; color: var(--forest); }
 .popularity-detail { color: inherit; opacity: .8; }
 .popularity-badge.tier-jackpot, .popularity-badge.tier-lucky { background: rgba(176, 132, 38, .14); border-color: #b08426; }
+
+/* ===== 0.7: library-paper minimalism, modelled on the desktop app =====
+   White page, ink-black type, one warm tan, cream reading area, hairline borders, Georgia for reading. */
+:root {
+  --ivory: #ffffff; --paper: #faf7f0; --tan: #ece4d6; --panel: #f6f4ee;
+  --ink: #202020; --muted: #555555; --forest: #202020; --forest-deep: #202020;
+  --line: #d0d0d0; --focus: #202020; --warn: #7a3b00;
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+}
+body { background: #fff; }
+a { color: var(--ink); }
+.brand { color: var(--ink); text-transform: uppercase; letter-spacing: .015em; font-weight: 700; font-size: clamp(1.7rem, 4.2vw, 2.5rem); line-height: 1.05; }
+.brand svg { display: none; }
+.tagline { font-family: var(--sans); font-style: normal; color: var(--muted); border-left: 0; padding-left: 0; font-size: .98rem; }
+.ocean-line { margin: 0 0 .35rem; font-family: var(--serif); font-style: italic; font-size: 1.05rem; color: var(--ink); max-width: 62ch; }
+.intro { margin-top: 0; }
+.passage-card { background: var(--paper); border: 1px solid var(--line); border-radius: 2px; box-shadow: none; min-height: 24rem; }
+.passage-card::before { display: none; }
+.passage-scroll { scrollbar-color: #999 transparent; }
+.card-label { margin: 0 0 1.1rem; padding: 0 0 .6rem; border-bottom: 1px solid var(--tan); font-family: var(--sans); font-size: .72rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.passage-text { font-family: var(--serif); font-size: clamp(1.28rem, 2.3vw, 1.45rem); line-height: 1.7; max-width: 33em; color: var(--ink); }
+.flourish { color: #b9b2a3; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 2px; }
+.panel h2 { font-family: var(--serif); color: var(--ink); font-size: 1.25rem; }
+.btn { background: #fff; color: var(--ink); border: 1px solid var(--ink); border-radius: 3px; }
+.btn:hover { background: var(--tan); }
+.btn.main { background: var(--ink); color: #fff; box-shadow: none; }
+.btn.main:hover { background: #000; }
+.status { background: var(--tan); border-radius: 2px; }
+.journey dd, .details h2, .view h2, .card h3, .prose h1, .prose h2, .confirm h2 { color: var(--ink); }
+.details { background: var(--paper); border-radius: 2px; box-shadow: none; }
+.details h2 { text-transform: none; }
+.monogram { color: #cfc6b4; }
+.chips li { border-color: var(--ink); color: var(--ink); }
+.banner { background: #f0f0f0; border-left-color: var(--ink); }
+.demo-notice { background: var(--tan); }
+.popularity-badge { border-color: var(--ink); background: #fff; }
+.popularity-badge.tier-jackpot, .popularity-badge.tier-lucky { background: var(--tan); border-color: var(--ink); }
+.cover { background: var(--ink); }
+.site-footer { border-top: 1px solid var(--line); }
+@media (max-width: 860px) { .passage-card { min-height: 21rem; } .passage-text { font-size: 1.22rem; } }
+
+/* ---- the librarian: the app's white sketch card with a real progress bar. Only after one second of waiting. ---- */
+.librarian {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3; pointer-events: none;
+  background: #fff; border: 1px solid #d0d0d0; padding: .55rem .8rem .65rem; box-shadow: 0 2px 12px rgba(0, 0, 0, .08);
+}
+.librarian[hidden] { display: none; }
+.librarian .caption { margin: 0 0 .15rem; font-family: var(--serif); font-style: italic; font-size: .98rem; color: var(--ink); min-height: 1.4em; }
+.librarian .scene { display: block; width: 100%; height: auto; }
+.librarian .meter { display: flex; align-items: center; gap: .6rem; margin-top: .35rem; }
+.librarian .bar { flex: 1; height: 8px; border: 1px solid var(--ink); background: #fff; }
+.librarian .bar i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .35s ease-out; }
+.librarian .pct { min-width: 3.2ch; font: 600 .85rem var(--sans); text-align: right; }
+@media (prefers-reduced-motion: reduce) { .librarian .bar i { transition: none; } }
+
+/* leftovers from the old colours */
+.main-nav a[aria-current="page"] { background: var(--tan); }
+.banner.warn { background: var(--tan); border-left-color: var(--ink); }
+#storage-reason { color: var(--muted); font-size: .85em; }
+.language-choice.is-planned { background: var(--panel); }

@@ -1,141 +1,100 @@
-"""Literary Roulette 0.3.0 — English, French and Chinese collections."""
-import json
+"""Literary Roulette web 0.8: a random ocean of Project Gutenberg books, prepared once and shared by everyone.
+
+Every spin is a uniform draw from the whole catalogue (universe.py, built from Gutenberg's pg_catalog.csv.gz). A book
+that has been prepared before is instant; a cold one is fetched once by a background worker while the visitor watches
+the librarian with real progress, then it stays in the shared library for every later reader. See README.md.
+"""
 import os
 import random
-import secrets
+import threading
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, session
 
 import analytics
-from catalogue import LINK_KINDS, Catalogue, load_json_list
-from gutenberg_pool import GutendexPool
-from catalogue_refresh import catalogue_status, reload_pool_if_changed, start_catalogue_refresh
+import draw
+import prep
+import tickets
+from library import LINK_KINDS
+from runtime import LANGUAGES, Runtime
 
 SITE = {"creator_name": "[Your Name]", "contact_email": "[rights contact email to be added]"}
-MAX_SEEN = 150
-LANGUAGES = {"en": "English", "fr": "Français", "zh": "中文"}
+EVENT_NAMES = ("passage_displayed", "another_passage_requested", "another_book_requested", "book_hidden",
+               "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
+EVENT_INTEREST = {"passage_displayed": "displayed", "another_passage_requested": "another", "book_saved": "saved"}
+MAX_SEEN_TOKENS = 300
+STAGE_TEXT = {"queued": "Waiting in the queue", "fetching": "Fetching this edition", "cleaning": "Cleaning the text",
+              "indexing": "Indexing passages", "ready": "Ready"}
 
 
-def load_secret(instance_dir):
-    env = os.environ.get("LR_SECRET_KEY")
-    if env:
-        return env
-    instance_dir.mkdir(parents=True, exist_ok=True)
-    path = instance_dir / "secret.key"
-    if not path.exists():
-        path.write_text(secrets.token_hex(32), encoding="utf-8")
-    return path.read_text(encoding="utf-8").strip()
-
-
-def _manifest(folder):
-    try:
-        value = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except (OSError, ValueError):
-        return {}
+def _env_flag(name, default):
+    return os.environ.get(name, "1" if default else "0") == "1"
 
 
 def create_app(test_config=None):
     base = Path(__file__).resolve().parent
     app = Flask(__name__)
     app.config.update(
-        DATA_DIR=base / "data", INSTANCE_DIR=base / "instance", DB_PATH=None,
-        ALLOW_DEMO=os.environ.get("LR_ALLOW_DEMO", "0") == "1",
+        BASE_DIR=base, DATA_DIR=base / "data", INSTANCE_DIR=base / "instance", SHELF_DIR=None, DB_PATH=None,
         DEFAULT_LANGUAGE="en", RNG=None, SITE=SITE,
-        GUTENBERG_CATALOG_PATH=None, GUTENBERG_CACHE_DIR=None,
-        AUTO_REFRESH_CATALOGUE=True, CATALOGUE_MAX_AGE_HOURS=24,
+        # Rights stay a separate gate from technical checks. While books.json still says
+        # "pending_verification", this lets you test locally. Set LR_ALLOW_PENDING_RIGHTS=0 to go public.
+        ALLOW_PENDING_RIGHTS=_env_flag("LR_ALLOW_PENDING_RIGHTS", True),
+        EMBEDDED_WORKER=_env_flag("LR_EMBEDDED_WORKER", True),
+        AUTO_REFRESH_CATALOGUE=True, CATALOGUE_MAX_AGE_HOURS=float(os.environ.get("LR_CATALOGUE_MAX_AGE_HOURS", "24")),
+        TICKET_TTL=int(os.environ.get("LR_TICKET_TTL", "7200")),
+        BATCH_SIZE=int(os.environ.get("LR_BATCH_SIZE", "3")), MAX_BATCH=5,
+        CATALOG_CSV=None, OFFLINE_STARTER=_env_flag("LR_OFFLINE_STARTER", False),
+        PREP_SETTINGS=None, FETCHER=None, ADMIN_TOKEN=os.environ.get("LR_ADMIN_TOKEN"),
     )
     if test_config:
         app.config.update(test_config)
 
-    data_dir = Path(app.config["DATA_DIR"])
+    rt = Runtime(app.config)
+    app.runtime, app.catalogues, app.shelf = rt, rt.catalogues, rt.shelf
+    app.secret_key = rt.secret
+    secret_bytes = rt.secret.encode("utf-8")
     instance_dir = Path(app.config["INSTANCE_DIR"])
-    app.secret_key = load_secret(instance_dir)
-    db_path = app.config["DB_PATH"] or Path(app.config["INSTANCE_DIR"]) / "analytics.db"
-    problems = []
-    catalogues = {}
-    gutendex_path = Path(app.config.get("GUTENBERG_CATALOG_PATH") or data_dir / "gutendex_catalog.json")
-    gutendex_cache = Path(app.config.get("GUTENBERG_CACHE_DIR") or Path(app.config["INSTANCE_DIR"]) / "gutenberg_cache")
-    try:
-        loaded_mtime_ns = gutendex_path.stat().st_mtime_ns
-    except OSError:
-        loaded_mtime_ns = None
-    gutendex = GutendexPool(gutendex_path, gutendex_cache)
-    # Remember which snapshot is already loaded, so the first request does not parse the whole file again.
-    gutendex._lr_loaded_mtime_ns = loaded_mtime_ns
-
-    for language, label in LANGUAGES.items():
-        folder = data_dir if language == "en" else data_dir / language
-        texts_dir = Path(app.config.get(f"{language.upper()}_TEXTS_DIR") or folder / "texts")
-        if language == "en" and app.config.get("TEXTS_DIR"):
-            texts_dir = Path(app.config["TEXTS_DIR"])
-        books_override = app.config.get("BOOKS") if language == "en" else None
-        passages_override = app.config.get("PASSAGES") if language == "en" else None
-        books = books_override if books_override is not None else load_json_list(folder / "books.json", problems)
-        passages = passages_override if passages_override is not None else load_json_list(folder / "passages.json", problems)
-        if language == "en" and app.config["ALLOW_DEMO"] and books_override is None:
-            books += load_json_list(folder / "demo_books.json", problems)
-            if passages_override is None:
-                passages += load_json_list(folder / "demo_passages.json", problems)
-        cat = Catalogue(
-            books, passages, app.secret_key, app.config["ALLOW_DEMO"],
-            base / "static" / "covers", texts_dir, _manifest(texts_dir), language=language,
-        )
-        catalogues[language] = cat
-        app.logger.info("%s: %d books ready; %d waiting for verified text.", label, len(cat.book_ids), len(cat.unavailable))
+    db_path = app.config["DB_PATH"] or instance_dir / "analytics.db"
+    for language, cat in rt.catalogues.items():
+        app.logger.info("%s: %d books cleared; %d with verified local text; %d prepared and ready.",
+                        language, len(cat.books), len(cat.local_texts), len(rt.starters(language)) + len(rt.lake(language)))
         for problem in cat.problems:
             app.logger.warning("%s catalogue: %s", language, problem)
-
-    app.catalogues = catalogues
-    app.catalogue = catalogues["en"]  # backward-compatible alias for existing tests/extensions
-    app.gutendex_pool = gutendex
-    unmatched_popularity = gutendex.attach_popularity(catalogues)
-    if gutendex.is_partial_snapshot:
-        app.logger.warning(
-            "Project Gutenberg metadata is a page-limited preview (%s); popularity badges are hidden. "
-            "Run `python3 tools/sync_gutenberg_rdf.py` for a complete catalogue and full rankings.",
-            gutendex.partial_reason,
-        )
-    for item in unmatched_popularity:
-        app.logger.warning(
-            "No matching Project Gutenberg popularity record found for curated book %s (Gutenberg #%s, language=%s). "
-            "Check the metadata refresh and the record's language, rights and text-format eligibility.",
-            item["title"], item["gutenberg_id"], item["language"],
-        )
-    for language, cat in catalogues.items():
-        if gutendex.count(language):
-            app.logger.info("%s Project Gutenberg metadata: %d titles available for on-demand selection.", language, gutendex.count(language))
+    if app.config["ALLOW_PENDING_RIGHTS"]:
+        app.logger.warning("Serving books whose rights_status is 'pending_verification' (LR_ALLOW_PENDING_RIGHTS=1). "
+                           "Clear each book's rights before a public launch.")
     analytics.init_db(db_path)
     if not app.testing:
-        analytics.start_writer(db_path)   # clicks never wait for the database
-    # Build the book-selection index now so no reader pays for it on their first spin or reveal.
-    gutendex.prewarm(catalogues)
+        analytics.start_writer(db_path)
 
-    # The last verified metadata snapshot is served immediately. A single background
-    # worker refreshes it only when older than the configured threshold.
-    catalogue_status_path = instance_dir / "gutenberg_catalogue_status.json"
-    catalogue_lock_path = instance_dir / "gutenberg_catalogue_refresh.lock"
+    if not app.testing:
+        # Threads that prepare books always run here, so a visitor's cold pick is never stranded. With
+        # LR_EMBEDDED_WORKER=1 (default) this process also opens/refreshes the catalogue and grows the library;
+        # with 0, run `python worker.py` once for that.
+        rt.worker.seed_local()
+        rt.worker.start(scheduler=app.config["EMBEDDED_WORKER"])
+        if app.config["EMBEDDED_WORKER"] and app.config["AUTO_REFRESH_CATALOGUE"]:
+            rt.sync.start()
 
-    def reload_catalogue_after_refresh():
-        reload_pool_if_changed(gutendex, catalogues, force=True)
-
-    start_catalogue_refresh(
-        project_root=base,
-        snapshot_path=gutendex_path,
-        archive_path=instance_dir / "gutenberg_rdf" / "rdf-files.tar.bz2",
-        status_path=catalogue_status_path,
-        lock_path=catalogue_lock_path,
-        after_success=reload_catalogue_after_refresh,
-        logger=app.logger,
-        max_age_hours=float(app.config.get("CATALOGUE_MAX_AGE_HOURS", 24)),
-        enabled=bool(app.config.get("AUTO_REFRESH_CATALOGUE", True)) and not app.testing,
-    )
+    _next_meta_check = [0.0]
+    _meta_lock = threading.Lock()
 
     @app.before_request
-    def reload_catalogue_if_another_worker_updated_it():
-        if reload_pool_if_changed(gutendex, catalogues):
-            app.logger.info("Loaded a newly published Gutenberg metadata snapshot.")
+    def pick_up_changes_from_other_processes():
+        if not request.path.startswith("/api/"):
+            return
+        if rt.shelf.refresh_if_changed():
+            rt.sync_external()
+        now = time.monotonic()
+        if now >= _next_meta_check[0] and _meta_lock.acquire(blocking=False):
+            try:
+                _next_meta_check[0] = now + 10
+                if rt.universe.reload():
+                    rt.attach_popularity()
+            finally:
+                _meta_lock.release()
 
     def rng():
         return app.config["RNG"] or random
@@ -144,85 +103,53 @@ def create_app(test_config=None):
         code = session.get("language", app.config["DEFAULT_LANGUAGE"])
         return code if code in LANGUAGES else "en"
 
-    @app.before_request
-    def migrate_legacy_english_session():
-        # Preserve English seen/revealed state from the single-language 0.3.0 app.
-        for old_key, new_key in (("seen_p", "seen_p:en"), ("seen_b", "seen_b:en"), ("revealed", "revealed:en")):
-            if old_key in session and new_key not in session:
-                session[new_key] = session[old_key]
-            session.pop(old_key, None)
-
-    def session_key(kind, language):
-        return f"{kind}:{language}"
-
-    def seen(kind, language):
-        return session.get(session_key(kind, language), [])
-
-    def remember(kind, language, value):
-        key = session_key(kind, language)
-        items = [v for v in seen(kind, language) if v != value] + [value]
-        session[key] = items[-MAX_SEEN:]
-
-    def fail(code, message, status=400):
-        return jsonify(ok=False, code=code, message=message), status
-
-    def find_book(book_token):
-        if not isinstance(book_token, str):
-            return None
-        for language, cat in catalogues.items():
-            book = gutendex.book_for_token(language, cat, book_token)
-            if book:
-                return language, cat, book
-        return None
-
-    def find_passage(token, book_token=None):
-        if not isinstance(token, str):
-            return None
-        if book_token:
-            found_book = find_book(book_token)
-            if not found_book:
-                return None
-            language, cat, book = found_book
-            try:
-                gutendex.ensure_book_loaded(language, cat, book)
-            except Exception as exc:
-                app.logger.warning("Could not load selected book for passage lookup: %s", exc)
-                return None
-            passage = cat.passage_by_token(token, book["id"])
-            return (language, cat, passage) if passage else None
-        # Backward compatibility for old links to a passage still resident in memory.
-        for language, cat in catalogues.items():
-            passage = cat.passage_by_token(token)
-            if passage:
-                return language, cat, passage
-        return None
-
-    def current_passage():
+    def body_json():
         body = request.get_json(silent=True)
-        if not isinstance(body, dict):
+        return body if isinstance(body, dict) else {}
+
+    def language_from(body):
+        code = body.get("language")
+        return code if code in LANGUAGES else active_language()
+
+    def fail(code, message, status=400, **extra):
+        return jsonify(ok=False, code=code, message=message, **extra), status
+
+    def clean_tokens(value, limit=MAX_SEEN_TOKENS):
+        if not isinstance(value, list):
+            return []
+        return [v for v in value[:limit] if isinstance(v, str) and len(v) <= 40]
+
+    def find_book(book_token, language=None):
+        """(language, catalogue, book) from an opaque book token. A dictionary lookup, no file I/O."""
+        order = [language] if language in rt.catalogues else []
+        order += [code for code in rt.catalogues if code not in order]
+        for code in order:
+            book = rt.catalogues[code].book_by_token(book_token)
+            if book and rt.shelf.has(code, book["id"]):
+                return code, rt.catalogues[code], book
+        return None
+
+    def not_ready(language):
+        return fail("empty_shelf", f"No {LANGUAGES[language]} books are ready yet. The librarian is opening the catalogue; "
+                    "try again in a moment, or run `python tools/prepare_shelf.py`.", 503)
+
+    def ocean_state(language):
+        sync = rt.sync.status()
+        return {"mode": rt.mode(language), "language": language, "total": rt.universe.count(language),
+                "totals": {code: rt.universe.count(code) for code in LANGUAGES},
+                "library": len(rt.lake(language)), "library_target": rt.worker.lake_target(language),
+                "catalogue": {"state": sync.get("state"), "running": bool(sync.get("running")), "message": sync.get("message"),
+                              "percent": sync.get("percent"), "error": sync.get("error")}}
+
+    def make_ticket(language, cat, bid, index):
+        text = rt.shelf.read_passage(language, bid, index)
+        if text is None:
             return None
-        return find_passage(body.get("token"), body.get("book_token"))
+        book_token = cat.book_token(bid)
+        return {"ticket": tickets.issue(secret_bytes, language, book_token, index, app.config["TICKET_TTL"]),
+                "token": cat.passage_key(bid, index), "book_token": book_token, "language": language, "text": text}
 
-    def record(cat, event, passage):
-        book = cat.book_of(passage)
-        analytics.log_event(db_path, event, book["id"], passage["id"], book.get("is_demo") is True)
-
-    def show(language, cat, passage, **extra):
-        remember("seen_p", language, cat.passage_token(passage))
-        book = cat.book_of(passage)
-        record(cat, "passage_displayed", passage)
-        data = {
-            "ok": True, "language": language, "language_label": LANGUAGES[language],
-            "token": cat.passage_token(passage), "text": passage["text"],
-            "book_token": cat.book_token(book),
-            "content_warning": passage.get("content_warning") or None,
-            "spoiler_level": passage.get("spoiler_level") or None,
-        }
-        if session.get(session_key("revealed", language)) == cat.book_token(book):
-            data["book"] = cat.book_payload(book, passage)
-        data.update(extra)
-        return jsonify(data)
-
+    # ---- pages -------------------------------------------------------------------------------
     @app.get("/")
     def index():
         return render_template("index.html", site=app.config["SITE"], language=active_language())
@@ -231,205 +158,195 @@ def create_app(test_config=None):
     def about():
         return render_template("about.html", site=app.config["SITE"], language=active_language())
 
+    @app.get("/healthz")
+    def healthz():
+        return jsonify(ok=True, ready=rt.ready_counts(), mode={code: rt.mode(code) for code in LANGUAGES})
+
+    # ---- status ------------------------------------------------------------------------------
     @app.get("/api/catalogue/status")
     def catalogue_refresh_status():
-        return jsonify(catalogue_status(catalogue_status_path, gutendex_path, gutendex))
+        return jsonify(rt.sync.status())
+
+    @app.get("/api/shelf/status")
+    def shelf_status():
+        detail = bool(app.config["ADMIN_TOKEN"]) and request.headers.get("X-LR-Admin") == app.config["ADMIN_TOKEN"]
+        data = rt.worker.status(detail=detail)
+        data["ready"] = rt.ready_counts()
+        data["mode"] = {code: rt.mode(code) for code in LANGUAGES}
+        return jsonify(ok=True, **data)
 
     @app.get("/api/languages")
     def languages():
         return jsonify(ok=True, active=active_language(), languages=[
-            {"code": code, "label": label, "ready_books": gutendex.available_count(code, catalogues[code])}
-            for code, label in LANGUAGES.items()
-        ])
+            {"code": code, "label": label, "ready_books": rt.universe.count(code) if rt.mode(code) == "ocean" else len(rt.starters(code))}
+            for code, label in LANGUAGES.items()])
 
     @app.post("/api/language")
     def set_language():
-        code = (request.get_json(silent=True) or {}).get("language")
+        code = body_json().get("language")
         if code not in LANGUAGES:
             return fail("unknown_language", "Choose English, French or Chinese.")
         session["language"] = code
-        return jsonify(ok=True, language=code, label=LANGUAGES[code],
-                       ready_books=gutendex.available_count(code, catalogues[code]))
+        return jsonify(ok=True, language=code, label=LANGUAGES[code], ready_books=rt.universe.count(code) if rt.mode(code) == "ocean" else len(rt.starters(code)))
 
-    @app.get("/api/passage/start")
-    def start():
-        language = active_language()
-        cat = catalogues[language]
-        if not cat.book_ids and not gutendex.count(language):
-            return fail("empty_catalogue", f"No {LANGUAGES[language]} books are ready yet. The metadata catalogue may still be downloading; wait for the librarian status to finish, then try again.", 503)
-        session[session_key("seen_p", language)] = []
-        session[session_key("seen_b", language)] = []
-        session[session_key("revealed", language)] = None
+    # ---- the read path -----------------------------------------------------------------------
+    @app.get("/api/ocean")
+    def ocean():
+        language = request.args.get("language")
+        return jsonify(ok=True, **ocean_state(language if language in LANGUAGES else active_language()))
+
+    def random_ticket(language, cat, bid):
+        total = rt.shelf.passage_count(language, bid)
+        index = draw.pick_passage_index(total, lambda i: cat.passage_key(bid, i), set(), rng()) if total > 1 else (0 if total else None)
+        return make_ticket(language, cat, bid, index) if index is not None else None
+
+    @app.post("/api/draw")
+    def draw_tickets():
+        """A few sealed, anonymous tickets: different books, each a uniform draw from the whole catalogue.
+
+        A book prepared before comes back at once. A cold one is queued for the worker and returned as a `pending`
+        handle to poll while the librarian works. If the queue is already too long to be fair to the visitor
+        (estimated_wait > max_cold_wait), the pick is swapped for a random book from the shared library instead."""
+        body = body_json()
+        language = language_from(body)
+        cat = rt.catalogues[language]
         try:
-            # Only the selected title is loaded; cached text is read on demand.
-            if gutendex.count(language):
-                passage, _restarted = gutendex.pick_passage(language, cat, rng(), set())
-                if passage is None:
-                    passage = cat.pick_first(rng())
+            count = int(body.get("count") or app.config["BATCH_SIZE"])
+        except (TypeError, ValueError):
+            count = app.config["BATCH_SIZE"]
+        count = max(1, min(count, app.config["MAX_BATCH"]))
+        seen = set(clean_tokens(body.get("seen")))
+        avoid = {b["id"] for t in clean_tokens(body.get("avoid"), 20) if (b := cat.book_by_token(t))}
+        mode = rt.mode(language)
+        if mode == "opening":
+            sync = rt.sync.status()
+            return fail("catalogue_opening", "The librarian is opening the catalogue.", 503, retry_after=1,
+                        progress={"message": sync.get("message") or "Opening the catalogue\u2026", "percent": sync.get("percent")})
+        out, pending, restarted, shed = [], [], False, 0
+        if mode == "starter":                    # the catalogue could not be opened: a small bundled shelf, said out loud
+            ids = rt.starters(language)
+            if not ids:
+                return not_ready(language)
+            picked, restarted = draw.pick_books(ids, cat.book_token, count, seen, rng(), avoid)
+            out = [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
+        else:
+            records = rt.universe.random_candidates(language, count, rng(), reject=lambda r: cat.book_token(r["id"]) in seen or r["id"] in avoid)
+            total = rt.universe.count(language)
+            for record in records:
+                ready = rt.ready_book_id(language, record["gutenberg_id"])
+                if ready:
+                    ticket = random_ticket(language, cat, ready)
+                    if ticket:
+                        out.append(ticket)
+                elif rt.worker.estimated_wait() <= rt.worker.settings.max_cold_wait:
+                    if not rt.worker.enqueue(prep.COLD, language, record, priority=0):
+                        rt.worker.bump(language, record["id"])
+                    pending.append({"handle": cat.book_token(record["id"]), "draw_number": record["draw_number"], "total": total})
+                else:
+                    shed += 1
+            if shed:                              # overload protection: still random, from what is already prepared
+                taken = {t["book_token"] for t in out} | {p["handle"] for p in pending}
+                lake = rt.lake(language)
+                picked, _ = draw.pick_books(lake, cat.book_token, shed, seen | taken, rng(), avoid)
+                out += [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
+                if not out and not pending:       # nothing prepared yet and the queue is long: the bundled shelf, said out loud
+                    picked, _ = draw.pick_books(rt.starters(language), cat.book_token, 1, seen, rng(), avoid)
+                    out = [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
+        if not out and not pending:
+            return fail("only_one_book", "Only one usable book is available in this collection.", 200)
+        return jsonify(ok=True, mode=mode, language=language, tickets=out, pending=pending, shed=shed,
+                       restarted=restarted, total=rt.universe.count(language), ready_books=len(rt.lake(language)))
+
+    @app.post("/api/draw/poll")
+    def draw_poll():
+        """Progress of picks that are still being prepared. Real stages, real percentages."""
+        body = body_json()
+        language = language_from(body)
+        cat = rt.catalogues[language]
+        results = []
+        for handle in clean_tokens(body.get("handles"), 8):
+            book = cat.book_by_token(handle)
+            if book and rt.shelf.has(language, book["id"]):
+                ticket = random_ticket(language, cat, book["id"])
+                results.append({"handle": handle, "state": "ready" if ticket else "failed", "percent": 100, "ticket": ticket})
+                continue
+            job = rt.worker.find_job(language, handle)
+            if job:
+                results.append({"handle": handle, "state": "working", "stage": job.stage, "percent": job.percent,
+                                "message": STAGE_TEXT.get(job.stage, "Working")})
             else:
-                passage = cat.pick_first(rng())
-        except Exception as exc:
-            app.logger.warning("On-demand Gutenberg selection failed; trying the verified local shelf: %s", exc)
-            if not cat.book_ids:
-                app.logger.exception("No local/cached fallback book is available")
-                return fail("gutenberg_fetch_failed", "The selected book could not be loaded and there is no saved book ready in this language yet. Please try again shortly.", 502)
-            passage = cat.pick_first(rng())
-            remember("seen_b", language, cat.book_token(cat.book_of(passage)))
-            return show(language, cat, passage, notice="One library text was temporarily unavailable, so we opened a book from the saved shelf instead.")
-        remember("seen_b", language, cat.book_token(cat.book_of(passage)))
-        return show(language, cat, passage)
+                results.append({"handle": handle, "state": "failed",
+                                "message": "That edition could not be fetched, so the librarian is drawing another."})
+        return jsonify(ok=True, results=results)
 
     @app.post("/api/passage/another")
     def another_passage():
-        found = current_passage()
+        body = body_json()
+        found = find_book(body.get("book_token"), body.get("language"))
         if not found:
-            return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-        language, cat, passage = found
-        record(cat, "another_passage_requested", passage)
-        nxt = cat.pick_other_passage(passage, set(seen("seen_p", language)), rng())
-        if nxt is None:
-            return jsonify(ok=False, code="no_other_passage", language=language,
-                           message="This book has no other passage available. Reveal it or spin another book.")
-        return show(language, cat, nxt)
+            return fail("unknown_book", "That book is no longer on the shelf. Spin for a new one.")
+        language, cat, book = found
+        bid, current = book["id"], None
+        payload = tickets.verify(secret_bytes, body.get("ticket"))
+        if payload and payload["book_token"] == body.get("book_token"):
+            current = payload["index"]
+        total = rt.shelf.passage_count(language, bid)
+        index = draw.pick_passage_index(total, lambda i: cat.passage_key(bid, i),
+                                        set(clean_tokens(body.get("seen"))), rng(), current)
+        if index is None:
+            return fail("no_other_passage", "This book has no other passage available. Reveal it or spin another book.", 200,
+                        language=language)
+        ticket = make_ticket(language, cat, bid, index)
+        if not ticket:
+            return fail("unknown_book", "That book is no longer on the shelf. Spin for a new one.")
+        return jsonify(ok=True, **ticket)
 
     @app.post("/api/book/reveal")
     def reveal():
-        body = request.get_json(silent=True) or {}
-        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
-        if found_book:
-            language, cat, book = found_book
-            session[session_key("revealed", language)] = cat.book_token(book)
-            analytics.log_event(db_path, "book_revealed", book["id"], None, book.get("is_demo") is True)
-            return jsonify(ok=True, language=language, book=cat.book_payload(book))
-        # Backward compatibility for clients that still submit a passage token.
-        found = current_passage()
+        """Metadata only. Never touches the book text."""
+        body = body_json()
+        found = find_book(body.get("book_token"), body.get("language"))
         if not found:
-            return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-        language, cat, passage = found
-        book = cat.book_of(passage)
-        session[session_key("revealed", language)] = cat.book_token(book)
-        record(cat, "book_revealed", passage)
-        return jsonify(ok=True, language=language, token=cat.passage_token(passage), book=cat.book_payload(book, passage))
-
-    @app.post("/api/book/spin")
-    def spin():
-        body = request.get_json(silent=True) or {}
-        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
-        if found_book:
-            language, cat, current_book = found_book
-            current_book_id = current_book["id"]
-            analytics.log_event(db_path, "another_book_requested", current_book_id, None,
-                                current_book.get("is_demo") is True)
-        else:
-            # Backward compatibility for older clients without a stable book token.
-            found = current_passage()
-            if not found:
-                return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-            language, cat, passage = found
-            current_book = cat.book_of(passage)
-            current_book_id = current_book["id"]
-            record(cat, "another_book_requested", passage)
-
-        extra = {}
-        try:
-            if gutendex.count(language):
-                nxt, restarted = gutendex.pick_passage(
-                    language, cat, rng(), set(seen("seen_b", language)), current_book_id=current_book_id
-                )
-            else:
-                bid, restarted = cat.pick_other_book(
-                    current_book_id, set(seen("seen_b", language)), rng()
-                )
-                nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
-        except Exception as exc:
-            app.logger.warning("On-demand Gutenberg spin failed; trying the verified local shelf: %s", exc)
-            bid, restarted = cat.pick_other_book(
-                current_book_id, set(seen("seen_b", language)), rng()
-            )
-            nxt = cat.pick_in_book(bid, set(seen("seen_p", language)), rng()) if bid else None
-            if nxt is not None:
-                extra["notice"] = "One library text was temporarily unavailable, so we opened another saved book instead."
-            else:
-                app.logger.exception("No alternative local/cached book is available")
-                return fail("gutenberg_fetch_failed", "The next library text could not be loaded. Your current passage is safe; please try spinning again shortly.", 502)
-        if nxt is None:
-            return jsonify(ok=False, code="only_one_book", language=language,
-                           message="Only one usable book is available in this collection.")
-        if restarted:
-            session[session_key("seen_b", language)] = []
-            session[session_key("seen_p", language)] = []
-            round_notice = "You have met every book in this language. Starting a fresh round."
-            extra["notice"] = (extra.get("notice", "") + " " + round_notice).strip()
-        remember("seen_b", language, cat.book_token(cat.book_of(nxt)))
-        session[session_key("revealed", language)] = None
-        if nxt["book_id"] != current_book_id:
-            cat.release_book(current_book_id)   # drop the previous whole-book text from memory
-        return show(language, cat, nxt, **extra)
+            return fail("unknown_book", "That book is no longer available. Spin for a new one.")
+        language, cat, book = found
+        payload = tickets.verify(secret_bytes, body.get("ticket"))
+        index = payload["index"] if payload and payload["book_token"] == body.get("book_token") else None
+        analytics.log_event(db_path, "book_revealed", book["id"], f"{book['id']}:{index}" if index is not None else None)
+        rt.shelf.note_interest(language, book["id"], "reveal")
+        return jsonify(ok=True, language=language, book=cat.book_payload(book, index))
 
     @app.post("/api/event")
     def event():
-        body = request.get_json(silent=True) or {}
-        name = body.get("event") if isinstance(body, dict) else None
-        allowed = ("book_hidden", "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
-        if name not in allowed:
+        body = body_json()
+        name = body.get("event")
+        if name not in EVENT_NAMES:
             return fail("unknown_event", "That event is not accepted.")
-        # New clients identify the book directly. Logging a save/hide/awareness
-        # event must not rehydrate a full book merely to find its metadata.
-        found_book = find_book(body.get("book_token")) if isinstance(body, dict) else None
-        if found_book:
-            language, cat, book = found_book
-            if name == "book_hidden":
-                session[session_key("revealed", language)] = None
-            analytics.log_event(db_path, name, book["id"], None, book.get("is_demo") is True)
-            return jsonify(ok=True, language=language)
-        # Backward compatibility for older clients.
-        found = current_passage()
+        found, passage_id = find_book(body.get("book_token"), body.get("language")), None
+        payload = tickets.verify(secret_bytes, body.get("ticket"))
+        if payload and found and payload["book_token"] == body.get("book_token"):
+            passage_id = f"{found[2]['id']}:{payload['index']}"
         if not found:
-            return fail("unknown_passage", "That passage is no longer available. Spin for a new one.")
-        language, cat, passage = found
-        if name == "book_hidden":
-            session[session_key("revealed", language)] = None
-        record(cat, name, passage)
+            return fail("unknown_book", "That book is not on the shelf.")
+        language, _cat, book = found
+        analytics.log_event(db_path, name, book["id"], passage_id, book.get("is_demo") is True)
+        if name in EVENT_INTEREST:
+            rt.shelf.note_interest(language, book["id"], EVENT_INTEREST[name])
         return jsonify(ok=True, language=language)
 
     @app.get("/go/<kind>/<token>")
     def go(kind, token):
-        if kind not in LINK_KINDS:
-            return render_template("about.html", site=app.config["SITE"], missing_link=True, language=active_language()), 404
-        found_book = find_book(token)
-        if found_book:
-            language, cat, book = found_book
-            url = cat.links_for(book).get(kind)
-            if not url:
-                return render_template("about.html", site=app.config["SITE"], missing_link=True, language=language), 404
-            analytics.log_event(db_path, f"{kind}_link_clicked", book["id"], None, book.get("is_demo") is True)
-            return redirect(url, 302)
-        # Accept older passage-token links retained by earlier browser sessions.
-        found = find_passage(token)
-        if not found:
-            return render_template("about.html", site=app.config["SITE"], missing_link=True, language=active_language()), 404
-        language, cat, passage = found
-        url = cat.links_for(cat.book_of(passage)).get(kind)
+        found = find_book(token) if kind in LINK_KINDS else None
+        url = found[1].links_for(found[2]).get(kind) if found else None
         if not url:
-            return render_template("about.html", site=app.config["SITE"], missing_link=True, language=language), 404
-        record(cat, f"{kind}_link_clicked", passage)
+            return render_template("about.html", site=app.config["SITE"], missing_link=True,
+                                   language=active_language()), 404
+        language, _cat, book = found
+        analytics.log_event(db_path, f"{kind}_link_clicked", book["id"], None, book.get("is_demo") is True)
+        rt.shelf.note_interest(language, book["id"], "link")
         return redirect(url, 302)
 
     @app.after_request
-    def add_language_switcher(response):
-        if request.path in ("/", "/about") and response.status_code == 200 and response.mimetype == "text/html":
-            html = response.get_data(as_text=True)
-            scripts = (
-                '<script src="/static/js/language-switcher.js" defer></script>',
-                '<script src="/static/js/catalogue-refresh.js" defer></script>',
-            )
-            changed = False
-            for script in scripts:
-                if script not in html:
-                    html = html.replace("</body>", script + "</body>") if "</body>" in html else html + script
-                    changed = True
-            if changed:
-                response.set_data(html)
+    def no_store_for_api(response):
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -438,4 +355,4 @@ def create_app(test_config=None):
 
 
 if __name__ == "__main__":
-    create_app().run(debug=True, port=5000)
+    create_app().run(debug=False, port=5000, threaded=True)

@@ -1,20 +1,22 @@
 {% extends "base.html" %}
 {% block main %}
 <div id="view-roulette">
-<p id="storage-warning" class="banner warn" hidden>Your browser is blocking local storage (private browsing?). History, saved books and uploads will only last until you close this tab.</p>
+<p id="storage-warning" class="banner warn" hidden>Your browser is blocking local storage (private browsing?). History, saved books and uploads will only last until you close this tab.<span id="storage-reason"></span></p>
 <p id="mode-banner" class="banner" hidden>You are spinning from your own uploaded books. They stay in this browser and are never sent to the server.</p>
+<p id="ocean-line" class="ocean-line" aria-live="polite">A library of thousands of stories is waiting. One draw chooses the book; its name stays hidden.</p>
 <p class="intro">Read a passage with no title attached. Keep reading, find out where it comes from, or move on to a different book.</p>
 
 <div class="stage">
   <section class="passage-card" aria-labelledby="passage-label">
     <div class="passage-scroll">
-    <h2 id="passage-label" class="card-label">A passage from an unnamed book</h2>
-    <blockquote id="passage-text" class="passage-text" tabindex="-1">Loading your first passage&hellip;</blockquote>
+    <h2 id="passage-label" class="card-label">The reading room &middot; your next surprise</h2>
+    <blockquote id="passage-text" class="passage-text" tabindex="-1">Opening the catalogue&hellip;</blockquote>
     <p id="passage-note" class="passage-note" hidden></p>
     <button id="start" class="btn start" type="button" hidden>Spin for a passage</button>
     <noscript><p class="passage-note">Literary Roulette needs JavaScript to show passages. Please turn it on and reload.</p></noscript>
     <svg class="flourish" viewBox="0 0 120 12" aria-hidden="true" focusable="false"><path d="M2 6h46M72 6h46" stroke="currentColor" stroke-width="1" fill="none"/><path d="M60 1l5 5-5 5-5-5z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
     </div>
+    <div id="librarian" class="librarian" role="status" aria-live="polite" hidden></div>
   </section>
 
   <section class="panel" aria-labelledby="panel-title">

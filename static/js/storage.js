@@ -1,16 +1,41 @@
 // Everything the reader keeps in THIS browser: history, saved books, uploaded books.
 // It uses IndexedDB. Nothing here is sent to the server and nothing syncs between devices.
 const STORES = ["history", "saved", "uploads"];
-export const HISTORY_LIMIT = 80;
+export const HISTORY_LIMIT = 75;   // history never piles up: the 75 most recent passages are kept
+
+const DB_NAME = "literary-roulette", SCHEMA_VERSION = 2;
+
+// Open the database and make sure EVERY store exists. An older copy of this origin's database may be missing a store
+// (for example "uploads" was added later without a version bump); that used to make every read fail and the page
+// wrongly claim the browser was blocking storage. Missing stores are now added in place and the data is kept.
+export function openDatabase(factory = globalThis.indexedDB, blockedMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const attempt = (version) => {
+      let blockedTimer = null;
+      const req = version ? factory.open(DB_NAME, version) : factory.open(DB_NAME);
+      req.onupgradeneeded = () => {
+        for (const name of STORES) if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: "id" });
+      };
+      req.onsuccess = () => {
+        clearTimeout(blockedTimer);
+        const db = req.result;
+        db.onversionchange = () => db.close();                  // never block another tab's upgrade
+        if (STORES.every((name) => db.objectStoreNames.contains(name))) return resolve(db);
+        const next = db.version + 1; db.close(); attempt(next);   // a store is missing: add it, keep what is there
+      };
+      req.onerror = () => {
+        clearTimeout(blockedTimer);
+        if (version && req.error && req.error.name === "VersionError") { req.preventDefault?.(); return attempt(undefined); }   // the database is newer than we asked for: open it as it is
+        reject(req.error || new Error("IndexedDB error"));
+      };
+      req.onblocked = () => { blockedTimer = setTimeout(() => reject(new Error("Another Literary Roulette tab is holding the old database open. Close it and reload.")), blockedMs); };
+    };
+    attempt(SCHEMA_VERSION);
+  });
+}
 
 export function idbAdapter(factory = globalThis.indexedDB) {
-  const opened = new Promise((resolve, reject) => {
-    const req = factory.open("literary-roulette", 1);
-    req.onupgradeneeded = () => STORES.forEach((s) => req.result.createObjectStore(s, { keyPath: "id" }));
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error("blocked"));
-  });
+  const opened = openDatabase(factory);
   const run = async (store, mode, fn) => {
     const db = await opened;
     return new Promise((resolve, reject) => {

@@ -1,140 +1,71 @@
-# Literary Roulette 0.3.0 — English full-text web prototype
+# Literary Roulette - web 0.8 (the random ocean)
 
-**Created by:** [Add your preferred public name]
+Read a random passage with no title attached. Keep reading, reveal the book, or spin to a different one.
+Every spin is a uniform random draw from **every** English, French and Chinese text edition in Project Gutenberg's catalogue
+(about 78,000 books, the same `pg_catalog.csv.gz` your desktop app uses). A book that has been prepared before is instant;
+a new one is fetched once while the black-and-white librarian works with a real stage and a real percentage, and then it stays
+in the shared library for every later reader.
 
-Read a passage first. Reveal the book only when you choose to. This is a separate Flask website project; it does not modify the Tkinter desktop app.
+## Run it (macOS / PyCharm terminal)
 
-## What this version includes
-
-- The agreed **40-book English catalogue**: 25 familiar-classic candidates and 15 discovery candidates.
-- Full-text ingestion and local storage. Once imported and reviewed, full texts are kept in `data/texts/`; a normal spin does not contact Project Gutenberg.
-- Passages generated from a verified stored text only when that book is selected, targeting roughly 80–150 words while respecting paragraphs and sentences where possible.
-- At most two generated full-book passage sets remain in each server worker memory; older active books are evicted and can be reloaded when needed.
-- On-demand Gutenberg full-text disk cache is bounded to 6 books / 32 MB (override with `LR_TEXT_CACHE_BOOKS` and `LR_TEXT_CACHE_MB`) and expires after 14 days. The persistent curated `data/texts/` source corpus is retained so verified editions do not need to be downloaded again.
-- Three independent actions: another passage from this book, reveal this book, and spin another book.
-- My History with search, revealed/unrevealed filters, reopen/reveal/remove actions, and clear-history confirmation. It keeps the newest 80 complete passages; book-text cache eviction does not remove History.
-- My Saved Books.
-- Browser-local `.txt` and `.epub` uploads, stored in IndexedDB and never sent to the server.
-- Lightweight SQLite event analytics and a local `stats.py` report.
-- A **reserved language bar**: English is active; Deutsch and 中文 are visual placeholders for a future patch, not working filters yet.
-
-## Important: full texts are not bundled in this ZIP
-
-The archive contains the catalogue and import tool, but not the 40 complete book files. Downloading the complete source corpus was not possible in the code-building environment. You need to run the importer on your Mac while connected to the internet.
-
-The importer downloads the selected Project Gutenberg plain-text edition (with a pause between requests), checks the title, author, language, Gutenberg wrapper, and minimum text length, removes the standard wrapper, writes cleaned text locally, and records results in `data/texts/manifest.json`. A book is available to the roulette only if its local text passes the automated checks and its checksum still matches the manifest.
-
-**Automated text checks are not a complete legal rights review.** Project Gutenberg marks many editions public domain in the US, but status can differ by country and may differ for translations or other added material. Review `data/texts/manifest.json`, the source edition, and its terms before public or commercial use. The catalogue is initially US-focused and should not be described as having worldwide rights clearance.
-
-## Run in PyCharm on macOS
-
-1. Extract the ZIP and open the `literary_roulette` folder in PyCharm.
-2. Create or select a virtual environment for this project.
-3. Open PyCharm's Terminal and install the dependency:
-
-   ```bash
-   python3 -m pip install -r requirements.txt
-   ```
-
-4. In that same terminal, run the importer:
-
-   ```bash
-   python3 tools/ingest_gutenberg.py
-   ```
-
-   The importer may take a while because it pauses between downloads. You can import one title first to test:
-
-   ```bash
-   python3 tools/ingest_gutenberg.py --only adventures-of-sherlock-holmes
-   ```
-
-5. Check the results:
-
-   ```bash
-   python3 tools/catalogue_status.py
-   ```
-
-   Review `data/texts/manifest.json`. Check `first_chars`, `last_chars`, `warnings`, and source metadata. A failed book is intentionally unavailable; do not force it to load or replace it with invented text.
-
-6. Start the website:
-
-   ```bash
-   python3 app.py
-   ```
-
-7. Open <http://127.0.0.1:5000> in your browser. Stop Flask with `Ctrl+C` in the terminal.
-
-If `python3 tools/ingest_gutenberg.py` fails for a title because the source is temporarily unavailable, you can download that title's Plain Text UTF-8 file from its linked Project Gutenberg page and save it into `data/texts_raw/` as `pg<ID>.txt`, then run the importer again for that book. Do not repeatedly retry a blocked source; use the source's guidance and available mirrors.
-
-## Demo content (optional, explicitly enabled)
-
-Five fictional passages are separated into `data/demo_books.json` and `data/demo_passages.json`. They are not part of the agreed 40-book catalogue and are **disabled by default**.
-
-For UI testing before real texts have been imported, run:
-
-```bash
-LR_ALLOW_DEMO=1 python3 app.py
+```
+cd literary-roulette-web
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py                        # open http://127.0.0.1:5000
 ```
 
-A visible notice identifies fictional demo books. Do not use demo records as evidence of book-selling effectiveness. To run only imported real titles, leave `LR_ALLOW_DEMO` unset (the default) or set it to `0`.
+That is all. On the very first start there is no catalogue index yet, so the page opens the catalogue itself: the librarian's
+cart appears at once with "Connecting to Project Gutenberg catalogue... Downloading catalogue... 42%... Reading catalogue
+metadata... Updating the local index...". It takes seconds, then your first book is drawn.
 
-## Where data lives
+Faster still, reuse the catalogue your desktop app already downloaded (no network needed for this step):
 
-- `data/books.json`: the 40-book catalogue, source edition IDs, descriptions, language (`en`), category (`classic` or `discovery`), and story-start hints.
-- `data/passages.json`: currently empty for public-approved excerpts; full-text passages are generated from `data/texts/*.txt` at server startup.
-- `data/texts_raw/`: downloaded source text cache used by the importer.
-- `data/texts/`: cleaned, complete local texts plus `manifest.json` verification details.
-- `instance/gutenberg_cache/`: bounded temporary full-text cache for books fetched on demand from the metadata catalogue (6 books / 32 MB / 14 days by default).
-- `instance/analytics.db`: aggregate product event counts. It does not store a visitor's full browsing history or raw IP address.
-- Browser IndexedDB: reader's history, saved books, and personal uploads. These stay in the current browser and do not sync across devices.
-
-Do not put API secrets or personal information in the public catalogue. A local full-text library should not automatically be included in a public GitHub repository; decide what to distribute and how to meet the source licence obligations before publishing the repository.
-
-## Reading experience
-
-- **Another passage from this book**: chooses a different passage from the same title where one exists.
-- **Reveal this book**: returns the current book details without changing the passage.
-- **Spin another book**: selects a different title and returns to anonymous reading.
-- **My History**: search passage words, filter by reveal status, reopen an exact passage, reveal it deliberately, remove an entry, or clear history.
-- **My Saved Books**: save an identified book and find it later.
-- **Upload my book**: process `.txt` and `.epub` locally in the browser (15 MB limit). DRM-protected files are not circumvented. Uploaded books stay private to this browser.
-
-History and saved books are device-local; clearing browser site data may erase them. The local uploads are never sent to the server.
-
-## Analytics
-
-Run `python3 stats.py` from the project folder after people have used the site. It summarizes passage displays, reveals, saved books, title-awareness responses, and read/borrow/buy-link clicks by catalogue segment and title. A click is only evidence of interest, not proof of a purchase. Do not draw strong conclusions from a small number of visitors. The report is a local developer tool, not a public admin page.
-
-## Extend later
-
-Every book already has a `language` field set to `en`, and the header reserves space for language choices. A future multilingual patch can add German (`de`) and Chinese collections and make the selector functional without redesigning the core passage experience. Chinese text will need language-aware passage splitting; the current text splitter is designed for English punctuation.
-
-To add a new book later, add a record to `data/books.json`, set a unique ID and source, add a verified `gutenberg_id` where applicable, and run the importer for that ID. For publisher-authorized material, build a separate approved-content workflow and record the permission, territory, and expiration conditions rather than pretending it is a Gutenberg book.
-
-## Tests
-
-Install Flask first, then run:
-
-```bash
-python3 -m unittest discover -s tests -t . -v
+```
+LR_CATALOG_CSV="/path/to/Literary-Roulette/data/pg_catalog.csv.gz" python app.py
 ```
 
-The suite includes Flask routes, full-text import checks, book-level selection fairness, and browser-side logic tests (Node.js is required for the latter). Run the suite again after changing the catalogue or passage-splitting rules.
+To make fresh copies of the project open instantly, build the index once and commit it:
 
-## Before any public launch
+```
+python tools/sync_catalogue.py --export-seed     # creates data/universe_seed.sqlite (a few MB)
+```
 
-- [ ] All 40 book texts have been downloaded and individually reviewed.
-- [ ] `catalogue_status.py` shows the intended titles as ready; no source mismatch remains unexplained.
-- [ ] Story starts contain no unwanted title page, preface, or contents list; endings contain no boilerplate.
-- [ ] Rights and territorial use have been reviewed for every text and edition.
-- [ ] No placeholder or fictional demo book is mixed into the real catalogue.
-- [ ] Read/borrow/purchase URLs are genuine and tested.
-- [ ] Privacy and hosting logs are reviewed for the public service.
-- [ ] History, upload isolation, keyboard navigation, and mobile layout are tested in a real browser.
+## How to test it
 
-## Speed and memory notes
+1. **First run, catalogue:** delete `instance/` and run `python app.py`. Open the page straight away: you should see the cart animation with a
+   percentage bar that moves only with real progress, then the first draw.
+2. **First book:** after the catalogue opens, the librarian carries the big book ("Drawing number N of T", "Fetching this edition",
+   "Cleaning the text", "Indexing passages") until your passage appears. The title stays hidden until you press Reveal.
+3. **Random ocean:** spin 15 times and reveal a few. Titles should mostly be unknown to you. The line under the title says how many stories are waiting and how many you have met.
+4. **Next spins:** while you read, the next books are fetched in the background, so many spins are instant; spin quickly and you will see the librarian again.
+5. **Library growing:** open `http://127.0.0.1:5000/api/ocean` (`library` counts prepared books) and `/api/shelf/status`.
+6. **Catalogue status / failures:** `/api/ocean` -> `catalogue.state` is `ready`, `running` or `failed` (with the reason). With no internet the page says so and opens the small starter shelf.
+7. **Local storage banner:** it should no longer appear. If it does, it now ends with the exact reason in brackets, e.g. `(NotFoundError)`.
+8. **Tests:** `python -m unittest discover -s tests -t . -v` (60 tests). For the IndexedDB tests also run `cd tests/js && npm install` once.
 
-- The browser never downloads the catalogue or any book text. The server keeps one selection index per language (built once at start-up and after each metadata refresh), so spinning picks a book with a few random draws instead of scanning the whole Gutenberg catalogue.
-- Revealing a book is a metadata lookup by `book_token`; it never loads, downloads or splits a text, even after a server restart.
-- Only the title currently being read is held in memory. Spinning to another book releases the previous book's passages, record and tokens immediately; its text can be re-read from the small disk cache if someone returns to it.
-- Analytics events are written by a background thread in batches (SQLite WAL), so a click never waits for the disk. Tests write synchronously.
+## Settings (environment variables)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LR_CATALOG_CSV` | unset | Use this `pg_catalog.csv.gz` instead of downloading one. |
+| `LR_CATALOGUE_MAX_AGE_HOURS` | `24` | Refresh the catalogue in the background when the index is older. |
+| `LR_LIBRARY_TARGET` | `300` | Prepared books to grow per language. Use `all` in production to prepare the entire catalogue (tens of GB). |
+| `LR_MAX_COLD_WAIT` | `12` | If the queue of new books would make a visitor wait longer than this (seconds), the pick is swapped for a random prepared book. |
+| `LR_FIRST_WAVE` / `LR_MAX_WAVE` | `3` / `12` | Background wave sizes. |
+| `LR_SOURCE_CONCURRENCY` / `LR_SOURCE_MIN_INTERVAL` | `2` / `2.0` | Simultaneous downloads / seconds between downloads (Gutenberg courtesy). |
+| `LR_EMBEDDED_WORKER` | `1` | `1`: this process also keeps the catalogue fresh and grows the library. `0`: run `python worker.py` for that. |
+| `LR_OFFLINE_STARTER` | `0` | `1`: always use the small bundled starter shelf (no catalogue). |
+| `LR_SECRET_KEY` | auto | Keep it to keep old History/Saved tokens valid. |
+
+## Rights
+
+The catalogue lists what Project Gutenberg distributes; it states US public-domain status, and rules differ by country. Add Gutenberg IDs to
+`data/blocklist.json` (a JSON list) to remove titles at once. Have the commercial plan checked before launch.
+
+## Files
+`app.py` routes - `catalogue_csv.py` download + read the catalogue - `catalogue_sync.py` first run, daily refresh, real progress -
+`universe.py` the whole catalogue (SQLite) - `prep.py` worker, waves, shedding - `shelf.py` prepared books - `source.py` download a book -
+`segment.py` splitting - `draw.py` fair selection - `tickets.py` sealed tickets - `library.py` catalogue + rights gate - `runtime.py` wiring -
+`static/js/librarian-scene.js` the desktop app's drawing - `librarian.js` the overlay + progress bar - `tickets.js` the ticket pouch - `storage.js` History/Saved.
