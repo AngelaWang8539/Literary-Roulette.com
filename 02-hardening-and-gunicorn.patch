@@ -1,0 +1,1159 @@
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/app.py stage2b/app.py
+--- stage1/app.py	2026-11-14 00:28:35.706224884 +0000
++++ stage2b/app.py	2026-11-14 10:31:35.116696937 +0000
+@@ -85,7 +85,7 @@
+     def pick_up_changes_from_other_processes():
+         if not request.path.startswith("/api/"):
+             return
+-        if rt.shelf.refresh_if_changed():
++        if rt.shelf.refresh_if_changed():          # another process published or retired a book
+             rt.sync_external()
+         now = time.monotonic()
+         if now >= _next_meta_check[0] and _meta_lock.acquire(blocking=False):
+@@ -259,24 +259,28 @@
+ 
+     @app.post("/api/draw/poll")
+     def draw_poll():
+-        """Progress of picks that are still being prepared. Real stages, real percentages."""
++        """Progress of picks that are still being prepared. Real stages, real numbers, from the shared job store, so
++        it does not matter which web process answers."""
+         body = body_json()
+         language = language_from(body)
+         cat = rt.catalogues[language]
+         results = []
+         for handle in clean_tokens(body.get("handles"), 8):
+             book = cat.book_by_token(handle)
++            view = None
++            if not (book and rt.shelf.has(language, book["id"])):
++                view = rt.worker.job_view(language, handle)
++                if view and view["state"] == "done":          # published by another process a moment ago: pick it up
++                    rt.sync_external()
++                    book = cat.book_by_token(handle)
+             if book and rt.shelf.has(language, book["id"]):
+                 ticket = random_ticket(language, cat, book["id"])
+                 results.append({"handle": handle, "state": "ready" if ticket else "failed", "percent": 100, "ticket": ticket})
+-                continue
+-            job = rt.worker.find_job(language, handle)
+-            if job:
+-                message = STAGE_TEXT.get(job.stage, "Working") + (f" \u00b7 {job.detail}" if job.detail else "")
+-                results.append({"handle": handle, "state": "working", "stage": job.stage,
+-                                "percent": None if job.indeterminate else job.percent, "message": message,
+-                                "ahead": rt.worker.ahead_of(job) if job.stage == "queued" else 0,
+-                                "stalled": round(time.time() - job.last_move, 1)})
++            elif view and view["state"] in ("queued", "running"):
++                message = STAGE_TEXT.get(view["stage"], "Working") + (f" \u00b7 {view['detail']}" if view["detail"] else "")
++                results.append({"handle": handle, "state": "working", "stage": view["stage"], "percent": view["percent"],
++                                "message": message, "ahead": view["ahead"] if view["stage"] == "queued" else 0,
++                                "stalled": round(time.time() - view["moved"], 1)})
+             else:
+                 results.append({"handle": handle, "state": "failed",
+                                 "message": "That edition could not be fetched, so the librarian is drawing another."})
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/catalogue_csv.py stage2b/catalogue_csv.py
+--- stage1/catalogue_csv.py	2026-11-14 00:28:35.706309148 +0000
++++ stage2b/catalogue_csv.py	2026-11-14 10:31:35.116799411 +0000
+@@ -7,6 +7,7 @@
+ """
+ import csv
+ import gzip
++import json
+ import os
+ import time
+ import urllib.error
+@@ -23,12 +24,20 @@
+ USER_AGENT = source.USER_AGENT
+ 
+ 
++class NotModified(Exception):
++    """The server says the catalogue has not changed since the copy we already have."""
++
++
++def _validators_path(dest):
++    return Path(dest).with_name(Path(dest).name + ".validators.json")
++
++
+ def _say(progress, message, percent=None):
+     if progress:
+         progress(message, percent)
+ 
+ 
+-def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=10, deadline=180):
++def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=10, deadline=180, conditional=True):
+     """Download the catalogue to `dest` (atomically). Tries the alternate server if the main one fails."""
+     dest = Path(dest)
+     dest.parent.mkdir(parents=True, exist_ok=True)
+@@ -39,7 +48,17 @@
+         try:
+             _say(progress, f"Connecting to {name} catalogue\u2026" if index == 0 else
+                  f"The main catalogue server is unavailable; trying {name}\u2026", 2)
+-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"})
++            headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
++            if dest.exists() and conditional:                  # ask "has it changed?" first: usually it has not, and then nothing is downloaded
++                try:
++                    known = json.loads(_validators_path(dest).read_text(encoding="utf-8"))
++                    if known.get("etag"):
++                        headers["If-None-Match"] = known["etag"]
++                    if known.get("last_modified"):
++                        headers["If-Modified-Since"] = known["last_modified"]
++                except (OSError, ValueError):
++                    pass
++            req = urllib.request.Request(url, headers=headers)
+             with opener(req, timeout=timeout) as response:
+                 try:
+                     size = int(response.headers.get("Content-Length") or 0)
+@@ -62,7 +81,17 @@
+                             raise TimeoutError(f"{name} was too slow (over {deadline} s)")
+             gzip.open(tmp, "rb").read(64)                      # must really be gzip data
+             os.replace(tmp, dest)
++            try:
++                _validators_path(dest).write_text(json.dumps({"etag": response.headers.get("ETag"),
++                                                              "last_modified": response.headers.get("Last-Modified")}), encoding="utf-8")
++            except OSError:
++                pass
+             return dest
++        except urllib.error.HTTPError as exc:
++            if exc.code == 304 and dest.exists():
++                raise NotModified() from exc
++            last = exc
++            tmp.unlink(missing_ok=True)
+         except (urllib.error.URLError, OSError, EOFError, TimeoutError, gzip.BadGzipFile) as exc:
+             last = exc
+             tmp.unlink(missing_ok=True)
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/catalogue_sync.py stage2b/catalogue_sync.py
+--- stage1/catalogue_sync.py	2026-11-14 00:28:35.706328144 +0000
++++ stage2b/catalogue_sync.py	2026-11-14 10:31:35.116847456 +0000
+@@ -115,7 +115,16 @@
+                 path = self.csv_path
+                 progress("Using your saved catalogue file\u2026", 55)
+             else:
+-                path = catalogue_csv.download(self.download_path, progress, urls=self.urls, opener=self.opener)
++                try:
++                    path = catalogue_csv.download(self.download_path, progress, urls=self.urls, opener=self.opener)
++                except catalogue_csv.NotModified:
++                    if self.rt.universe.available:             # unchanged since last time: just record that it is fresh
++                        universe_mod.touch(self.rt.universe_path)
++                        self.rt.universe.reload(force=True)
++                        self._set(state="ready", running=False, percent=100, error=None,
++                                  message="Gutenberg catalogue is up to date.")
++                        return True
++                    path = self.download_path                    # (index missing but the file is there: rebuild from it)
+             records = catalogue_csv.read_records(path, progress)
+             counts = universe_mod.build_from_records(records, self.rt.universe_path, blocked=self.rt.universe.blocked,
+                                                      log=log.info, progress=progress)
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/docs/GUNICORN.md stage2b/docs/GUNICORN.md
+--- stage1/docs/GUNICORN.md	1970-01-01 00:00:00.000000000 +0000
++++ stage2b/docs/GUNICORN.md	2026-11-14 10:31:35.138996793 +0000
+@@ -0,0 +1,61 @@
++# Serving Literary Roulette with Gunicorn
++
++Gunicorn runs several copies (workers) of the web app so many readers are served at once. This guide is for ONE machine.
++
++## What runs where
++
++```
++nginx (optional)  ->  gunicorn: 3-4 web workers   (readers: draws, polls, reveals, cold-book preparation on request)
++                      python worker.py: 1 process  (opens/refreshes the catalogue, grows the library in the background)
++                      all share ONE folder: instance/   (catalogue index, library, job progress, secret key, analytics)
++```
++
++## Steps
++
++```
++python -m pip install -r requirements.txt -r requirements-prod.txt
++python worker.py                                   # terminal 1: keep it running (opens the catalogue the first time)
++gunicorn -c gunicorn.conf.py wsgi:app              # terminal 2: open http://127.0.0.1:8000
++```
++
++Start `worker.py` first on a fresh install: the web workers show the librarian's catalogue cart until it has opened the catalogue.
++For a quick local trial with a saved catalogue file: `LR_CATALOG_CSV=/path/to/pg_catalog.csv.gz python worker.py`.
++
++## Settings (environment variables)
++
++| Variable | Default | Meaning |
++|---|---|---|
++| `LR_BIND` | `127.0.0.1:8000` | Address Gunicorn listens on. |
++| `LR_WEB_WORKERS` / `LR_WEB_THREADS` | `min(4, CPU cores)` / `4` | Processes and threads per process. |
++| `LR_EMBEDDED_WORKER` | `0` (set by the config) | Web workers must NOT run the background jobs; `worker.py` does. |
++| `LR_SECRET_KEY` | auto (`instance/secret.key`) | Signs tickets. On one machine the file is created once and shared. On several machines set the same value everywhere. |
++| `LR_LIBRARY_TARGET` | `300` | Books to prepare per language in the background; `all` for the whole catalogue (tens of GB). |
++| `LR_SOURCE_MIN_INTERVAL` | `2.0` | Seconds between downloads from Gutenberg, shared by every process. |
++| `LR_MAX_COLD_WAIT` | `12` | Queue length (seconds) beyond which a new pick is swapped for a prepared book. |
++
++## Notices
++
++1. **One machine, one folder.** All processes must see the same `instance/` folder on a local disk. Do not put it on a network drive (SQLite locking). Several machines need a shared database and object storage (see "Next upgrades").
++2. **Never use `--preload`.** Each worker starts its own small background threads (they prepare the books that readers ask for).
++3. **Never run two `worker.py`.** The catalogue refresh and library growth are meant to run once.
++4. **More workers do not mean more load on Gutenberg.** The gap between downloads is a machine-wide file lock, and identical requests are de-duplicated.
++5. **First start after upgrading:** the library layout changed. Delete `instance/ready` (it is only a cache of public texts). The starter books are rebuilt automatically and other books are fetched again when drawn.
++6. **Poll and draw share state.** A reader's progress poll can be answered by any worker: progress lives in `instance/ready/jobs.sqlite`.
++7. **Health checks:** `/healthz` (up), `/api/ocean` (catalogue + library), `/api/shelf/status` (queue, breaker; add header `X-LR-Admin: <LR_ADMIN_TOKEN>` for job details).
++8. **Circuit breaker:** after 6 temporary download failures in a row, new downloads pause for 2 minutes and draws are served from prepared books. `/api/shelf/status` shows `breaker_open`.
++9. **Behind nginx:** proxy to Gunicorn, enable gzip, keep `proxy_read_timeout 30s`, add HTTPS. Static files are served by the app; cache `/static/` for a day in nginx if you like.
++10. **Run on boot (systemd, Linux):** one service for `python worker.py`, one for `gunicorn -c gunicorn.conf.py wsgi:app`, both with the same `WorkingDirectory` and `Environment=LR_SECRET_KEY=...`.
++
++## Quick load test
++
++```
++brew install hey      # macOS
++hey -z 30s -c 50 -m POST -T application/json -d '{"count":3}' http://127.0.0.1:8000/api/draw
++```
++Watch `/api/shelf/status`: with a cold library most answers come back as pending picks, and when the queue is long the replies switch to
++prepared books (`shed` in the answer). Re-run after the library has grown to see warm speed. Test 10, 100 and 10,000 simultaneous readers before promising more.
++
++## Known limits and next upgrades
++
++- Each process keeps a small record of every prepared book it has seen; with the library at "all" that is roughly 80 MB per process. Fix when needed: look books up by token in the library index instead of keeping them in memory.
++- Several machines: move `instance/` data to a managed database (jobs, library index), object storage + CDN (books), and a shared analytics store. The modules `jobstate.py` and `shelf.py` are the two places to swap.
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/gunicorn.conf.py stage2b/gunicorn.conf.py
+--- stage1/gunicorn.conf.py	1970-01-01 00:00:00.000000000 +0000
++++ stage2b/gunicorn.conf.py	2026-11-14 10:31:35.137843092 +0000
+@@ -0,0 +1,24 @@
++"""Gunicorn settings for Literary Roulette. Start with:  gunicorn -c gunicorn.conf.py wsgi:app
++
++Everything can be changed with environment variables, so the same file works on a laptop and on a server.
++Read docs/GUNICORN.md first (start the background worker, keep one shared instance folder, set LR_SECRET_KEY).
++"""
++import multiprocessing
++import os
++
++# The web processes only serve readers and prepare the books those readers ask for. Growing the library and keeping
++# the catalogue fresh is done ONCE by `python worker.py`, so more web processes never mean more downloads.
++os.environ.setdefault("LR_EMBEDDED_WORKER", "0")
++
++bind = os.environ.get("LR_BIND", "127.0.0.1:8000")
++workers = int(os.environ.get("LR_WEB_WORKERS", min(4, multiprocessing.cpu_count())))
++worker_class = "gthread"                                  # threads: a poll never waits behind another reader
++threads = int(os.environ.get("LR_WEB_THREADS", 4))
++timeout = 30
++graceful_timeout = 20
++keepalive = 5
++max_requests = 2000                                       # recycle workers now and then (keeps memory flat)
++max_requests_jitter = 200
++preload_app = False                                       # each worker must start its own background threads
++accesslog = "-"
++errorlog = "-"
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/jobstate.py stage2b/jobstate.py
+--- stage1/jobstate.py	1970-01-01 00:00:00.000000000 +0000
++++ stage2b/jobstate.py	2026-11-14 10:31:34.106940473 +0000
+@@ -0,0 +1,67 @@
++"""Shared job state: one small SQLite file (WAL) that every web process and the worker can read and write.
++
++Visitors poll the progress of a cold book; with several web processes the poll may land on a different process than the
++one doing the work, so progress cannot live in one process's memory. The interface is deliberately tiny (upsert / view /
++pending_cold / prune) so Redis or a database can replace this file later without touching the callers.
++"""
++import sqlite3
++import threading
++import time
++from pathlib import Path
++
++
++class JobStore:
++    def __init__(self, path, clock=time.time):
++        self.path, self._clock = Path(path), clock
++        self._local = threading.local()
++        self.path.parent.mkdir(parents=True, exist_ok=True)
++        with self._conn() as c:
++            c.execute("""CREATE TABLE IF NOT EXISTS jobs (
++                key TEXT PRIMARY KEY, language TEXT NOT NULL, token TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL,
++                stage TEXT, percent REAL, detail TEXT, error TEXT, prio INTEGER, queued_at REAL, updated REAL, moved REAL)""")
++            c.execute("CREATE INDEX IF NOT EXISTS jobs_token ON jobs (language, token)")
++            c.execute("CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state)")
++
++    def _conn(self):
++        conn = getattr(self._local, "conn", None)
++        if conn is None:
++            conn = sqlite3.connect(self.path, timeout=10, isolation_level=None, check_same_thread=False)
++            conn.execute("PRAGMA journal_mode=WAL")
++            conn.execute("PRAGMA synchronous=NORMAL")
++            self._local.conn = conn
++        return conn
++
++    def upsert(self, key, language, token, kind, state, stage, percent, detail="", error=None, prio=5, queued_at=None, moved=None):
++        now = self._clock()
++        self._conn().execute(
++            """INSERT INTO jobs (key, language, token, kind, state, stage, percent, detail, error, prio, queued_at, updated, moved)
++               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
++               ON CONFLICT(key) DO UPDATE SET state=excluded.state, stage=excluded.stage, percent=excluded.percent,
++                 detail=excluded.detail, error=excluded.error, prio=excluded.prio, updated=excluded.updated,
++                 moved=COALESCE(excluded.moved, jobs.moved), queued_at=COALESCE(jobs.queued_at, excluded.queued_at)""",
++            (key, language, token, kind, state, stage, percent, detail, error, prio, queued_at or now, now, moved or now))
++
++    def view(self, language, token):
++        """The newest job for this book token as a dict (with `ahead`), or None."""
++        c = self._conn()
++        row = c.execute("""SELECT key, state, stage, percent, detail, error, prio, queued_at, moved, kind FROM jobs
++                           WHERE language=? AND token=? ORDER BY updated DESC LIMIT 1""", (language, token)).fetchone()
++        if not row:
++            return None
++        key, state, stage, percent, detail, error, prio, queued_at, moved, kind = row
++        ahead = 0
++        if state == "queued":
++            ahead = c.execute("""SELECT COUNT(*) FROM jobs WHERE kind='cold' AND key != ? AND (state='running' OR
++                                 (state='queued' AND (prio < ? OR (prio = ? AND queued_at < ?))))""", (key, prio, prio, queued_at)).fetchone()[0]
++        return {"key": key, "state": state, "stage": stage, "percent": percent, "detail": detail or "", "error": error,
++                "moved": moved or 0, "ahead": ahead, "kind": kind}
++
++    def pending_cold(self):
++        return self._conn().execute("SELECT COUNT(*) FROM jobs WHERE kind='cold' AND state IN ('queued','running')").fetchone()[0]
++
++    def prune(self, finished_after=600.0, abandoned_after=900.0):
++        """Keep the table small: forget finished jobs, and fail jobs whose process disappeared."""
++        now, c = self._clock(), self._conn()
++        c.execute("DELETE FROM jobs WHERE state IN ('done','failed') AND updated < ?", (now - finished_after,))
++        c.execute("UPDATE jobs SET state='failed', error='The worker stopped before finishing.', updated=? WHERE state IN ('queued','running') AND updated < ?",
++                  (now, now - abandoned_after))
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/prep.py stage2b/prep.py
+--- stage1/prep.py	2026-11-14 00:28:35.706156890 +0000
++++ stage2b/prep.py	2026-11-14 10:31:35.116546382 +0000
+@@ -24,6 +24,7 @@
+ import time
+ from pathlib import Path
+ 
++import jobstate
+ import segment
+ import source
+ 
+@@ -49,6 +50,8 @@
+         self.check_interval = float(kw.get("check_interval", 3.0))
+         self.failed_keep = int(kw.get("failed_keep", 300))
+         self.replenish = bool(kw.get("replenish", True))
++        self.breaker_threshold = int(kw.get("breaker_threshold", 6))   # consecutive temporary failures that pause fetching
++        self.breaker_seconds = float(kw.get("breaker_seconds", 120))
+ 
+ 
+ def edition_key_for(book):
+@@ -78,7 +81,10 @@
+         self.wave = {lang: self.settings.first_wave for lang in catalogues}
+         self._sleep, self._clock = sleep, clock
+         self.rng = rng or random.Random()
+-        self.gate = source.RateGate(self.settings.min_interval)
++        self.state_dir.mkdir(parents=True, exist_ok=True)
++        self.store = jobstate.JobStore(self.state_dir / "jobs.sqlite", clock=clock)     # progress every process can see
++        self.gate = source.SharedRateGate(self.state_dir / ".gate", self.settings.min_interval)   # courtesy gap, machine-wide
++        self._fail_streak, self._breaker_until = 0, 0.0
+         self._downloads = threading.BoundedSemaphore(max(1, self.settings.source_concurrency))
+         self._cv = threading.Condition()
+         self._heap, self._delayed, self._seq = [], [], 0
+@@ -147,6 +153,7 @@
+             self._jobs[key] = job
+             self._push(job)
+             self._cv.notify()
++        self._publish(job)
+         return True
+ 
+     def _push(self, job):
+@@ -236,18 +243,44 @@
+             if job:
+                 self._process(job)
+ 
++    def breaker_open(self):
++        return self._clock() < self._breaker_until
++
++    def _note_result(self, ok, transient=False):
++        """Circuit breaker: a run of temporary failures (server down, blocked) pauses fetching instead of hammering Gutenberg."""
++        if ok:
++            self._fail_streak = 0
++        elif transient:
++            self._fail_streak += 1
++            if self._fail_streak >= self.settings.breaker_threshold:
++                self._breaker_until = self._clock() + self.settings.breaker_seconds
++                self._fail_streak = 0
++                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs", self.settings.breaker_seconds)
++
+     def _process(self, job):
+-        release = self._claim(job.key)
+         try:
++            if job.kind == COLD and self.breaker_open():       # paused: do not start a download, look again when it closes
++                self._finish(job, requeue_after=max(1.0, self._breaker_until - self._clock()), count_attempt=False)
++                return
++            release = self._claim(job.key)
+             if release is None:                 # another process is preparing this edition right now
+-                self._finish(job, requeue_after=20.0, count_attempt=False)
++                self._finish(job, requeue_after=3.0, count_attempt=False)
+                 return
+             try:
++                self.shelf.refresh_if_changed()
++                if job.kind == COLD and self.shelf.has(job.language, job.book["id"]):
++                    job.stage, job.percent, job.detail, job.indeterminate = "ready", 100, "", False    # someone else already prepared it
++                    self._finish(job, done=True)
++                    return
+                 job.attempts += 1
++                self._publish(job, "running")
+                 self._prepare(job)
++                self._note_result(True)
+                 self._finish(job, done=True)
+             except source.SourceError as exc:
+                 job.error = str(exc)
++                if job.kind == COLD:
++                    self._note_result(False, transient=not exc.permanent)
+                 self._finish(job, permanent=exc.permanent)
+             except Exception as exc:            # a bug or odd text: record it, never kill the worker
+                 job.error = f"{type(exc).__name__}: {exc}"
+@@ -265,31 +298,47 @@
+                 self._jobs.pop(job.key, None)
+                 self._failed.pop(job.key, None)
+                 self.completed += 1
+-                return
+-            if requeue_after is not None:
++                outcome = ("done", None)
++            elif requeue_after is not None:
+                 job.state, job.not_before = "queued", self._clock() + requeue_after
+                 if not count_attempt:
+                     job.attempts = max(0, job.attempts - 1)
+                 self._push(job)
+                 self._cv.notify()
+-                return
+-            if permanent or job.attempts >= self.settings.max_attempts:
++                outcome = ("queued", None)
++            elif permanent or job.attempts >= self.settings.max_attempts:
+                 self._jobs.pop(job.key, None)
+                 self._failed[job.key] = {"error": job.error, "permanent": True, "attempts": job.attempts,
+                                          "at": self._clock(), "book": job.book["id"], "language": job.language}
+                 self._save_failed()
+                 log.warning("Giving up on %s: %s", job.key, job.error)
+-                return
+-            delay = min(self.settings.backoff_cap, self.settings.backoff_base * (2 ** (job.attempts - 1)))
+-            delay *= 0.5 + self.rng.random()                     # jitter
+-            job.state, job.not_before = "queued", self._clock() + delay
+-            self._push(job)
+-            self._cv.notify()
+-            log.info("Will retry %s in %.0fs: %s", job.key, delay, job.error)
++                outcome = ("failed", job.error)
++            else:
++                delay = min(self.settings.backoff_cap, self.settings.backoff_base * (2 ** (job.attempts - 1)))
++                delay *= 0.5 + self.rng.random()                 # jitter
++                job.state, job.not_before = "queued", self._clock() + delay
++                self._push(job)
++                self._cv.notify()
++                log.info("Will retry %s in %.0fs: %s", job.key, delay, job.error)
++                outcome = ("queued", job.error)
++        self._publish(job, outcome[0], outcome[1])
++
++    def _publish(self, job, state=None, error=None):
++        """Write this job's visible state to the shared store (so any process can answer a visitor's poll)."""
++        try:
++            self.store.upsert(job.key, job.language, self.catalogues[job.language].book_token(job.book["id"]), job.kind,
++                              state or job.state, job.stage, None if job.indeterminate else job.percent, job.detail,
++                              error if error is not None else job.error, job.priority, job.queued_at, job.last_move)
++            job._published = time.monotonic()
++        except Exception:                      # progress is a nicety: never let it break preparing a book
++            log.exception("Could not write job state")
+ 
+     def _set_stage(self, job, stage, percent, detail="", indeterminate=False):
++        changed = (stage != job.stage) or (indeterminate != job.indeterminate)
+         job.stage, job.percent = stage, max(job.percent, percent) if stage == job.stage else percent
+         job.detail, job.indeterminate, job.last_move = detail, indeterminate, time.time()
++        if changed or time.monotonic() - getattr(job, "_published", 0) > 0.25:
++            self._publish(job)
+ 
+     def _prepare(self, job):
+         language, book = job.language, job.book
+@@ -343,10 +392,16 @@
+         return min(self.settings.library_target, max(0, self.universe.count(language)))
+ 
+     def estimated_wait(self):
+-        """Seconds a newly queued visitor pick would wait: the cold jobs ahead of it, one download start per gap."""
+-        with self._cv:
+-            ahead = sum(1 for j in self._jobs.values() if j.kind == COLD and j.state in ("queued", "running"))
+-        return ahead * self.settings.min_interval / max(1, 1)
++        """Seconds a newly queued visitor pick would wait: every process's cold jobs ahead of it (shared store), one download
++        start per gap. While the circuit breaker is open the wait is reported as long, so draws shed to prepared books."""
++        wait = self.store.pending_cold() * self.settings.min_interval
++        if self.breaker_open():
++            wait += (self._breaker_until - self._clock()) + self.settings.max_cold_wait + 1
++        return wait
++
++    def job_view(self, language, book_token):
++        """Progress of the newest job for this book token, from the shared store (any process can answer)."""
++        return self.store.view(language, book_token)
+ 
+     def lake_deficit(self, language):
+         return max(0, self.lake_target(language) - len(self.lake_ids(language)) - self.pending_cold(language))
+@@ -424,6 +479,7 @@
+ 
+     def maintenance(self):
+         """Only if the library has grown past its target (plus one wave): retire the OLDEST books, by age alone."""
++        self.store.prune()
+         for language, cat in self.catalogues.items():
+             for victim in self.shelf.evict_cold(language, self.settings.library_target + self.settings.max_wave):
+                 cat.unregister_external(victim)
+@@ -446,7 +502,7 @@
+                 "running": bool(self._threads), "busy": self._busy, "completed": self.completed,
+                 "queued": sum(1 for j in jobs if j.state == "queued"),
+                 "active": sum(1 for j in jobs if j.state == "running"),
+-                "failed": len(self._failed),
++                "failed": len(self._failed), "breaker_open": self.breaker_open(),
+                 "languages": {
+                     lang: {"lake": len(self.lake_ids(lang)), "target": self.lake_target(lang),
+                            "pending": sum(1 for j in jobs if j.language == lang),
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/requirements-prod.txt stage2b/requirements-prod.txt
+--- stage1/requirements-prod.txt	1970-01-01 00:00:00.000000000 +0000
++++ stage2b/requirements-prod.txt	2026-11-14 10:31:35.137920672 +0000
+@@ -0,0 +1 @@
++gunicorn>=22
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/runtime.py stage2b/runtime.py
+--- stage1/runtime.py	2026-11-14 00:28:35.706203135 +0000
++++ stage2b/runtime.py	2026-11-14 10:31:35.133305718 +0000
+@@ -4,6 +4,7 @@
+ import secrets
+ import shutil
+ import threading
++import time
+ from pathlib import Path
+ 
+ import catalogue_sync
+@@ -17,14 +18,25 @@
+ 
+ 
+ def load_secret(instance_dir):
++    """The signing key. Use LR_SECRET_KEY on several machines. On one machine it is created once, atomically, so several
++    Gunicorn workers starting at the same moment all end up with the SAME key (otherwise their tickets would not match)."""
+     env = os.environ.get("LR_SECRET_KEY")
+     if env:
+         return env
+     instance_dir.mkdir(parents=True, exist_ok=True)
+     path = instance_dir / "secret.key"
+-    if not path.exists():
+-        path.write_text(secrets.token_hex(32), encoding="utf-8")
+-    return path.read_text(encoding="utf-8").strip()
++    try:
++        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
++        with os.fdopen(fd, "w", encoding="utf-8") as handle:
++            handle.write(secrets.token_hex(32))
++    except FileExistsError:
++        pass
++    for _ in range(50):                                 # the creating process may still be writing
++        value = path.read_text(encoding="utf-8").strip()
++        if len(value) >= 32:
++            return value
++        time.sleep(0.05)
++    raise RuntimeError("The secret key file is empty; delete instance/secret.key and start again.")
+ 
+ 
+ def settings_from_env(overrides=None):
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/shelf.py stage2b/shelf.py
+--- stage1/shelf.py	2026-11-14 00:28:35.706138855 +0000
++++ stage2b/shelf.py	2026-11-14 10:31:35.116468116 +0000
+@@ -1,22 +1,26 @@
+-"""The shared ready shelf: prepared books that any visitor can draw from, many times over.
++"""The shared library of prepared books, indexed in one SQLite file (WAL) so it stays light however large it grows.
+ 
+-Each prepared book is two files per language folder:
+-  <id>.<hash8>.txt   all passages back to back (UTF-8)
+-  <id>.meta.json     the ready marker: passage byte offsets, edition key, content hash, segment version
+-
+-Meta is written last and replaced atomically, so a half-written book is never "ready". Reading one
+-passage is a seek + read: no full-book parsing and nothing held in memory but the offsets.
+-Several processes (web workers, the background worker) may share one shelf folder.
++Per language folder, per book:
++  <id>.<hash8>.<segver>.txt   all passages back to back (UTF-8)
++  <id>.<hash8>.<segver>.idx   passage byte offsets (unsigned 32-bit array)
++and one row in library.sqlite, written LAST in a single transaction: that row is the "ready" marker, so a half-written
++book is never served. Nothing is held in memory but a small cache of recently read offset tables; start-up reads no
++book files at all. Several processes (web workers, the background worker) can share one folder safely.
+ """
+ import json
+ import os
+ import re
++import sqlite3
+ import threading
+ import time
++from array import array
++from collections import OrderedDict
+ from pathlib import Path
+ 
+ SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
+ INTEREST_WEIGHTS = {"displayed": 1.0, "another": 2.0, "reveal": 2.0, "saved": 5.0, "link": 5.0}
++OFFSET_CACHE = 256
++COLUMNS = "book_id, file, bytes, passages, content_hash, segment_version, edition_key, prepared_at, external, book"
+ 
+ 
+ def safe_name(book_id):
+@@ -24,198 +28,207 @@
+ 
+ 
+ class ReadyShelf:
+-    def __init__(self, root, languages=("en", "fr", "zh"), scan_interval=2.0):
++    def __init__(self, root, languages=("en", "fr", "zh"), scan_interval=0.0):
+         self.root, self.languages = Path(root), tuple(languages)
+-        self.scan_interval = scan_interval
+-        self.version = 0
+-        self._lock = threading.RLock()
+-        self._index = {lang: {} for lang in self.languages}     # lang -> {book_id: meta}
+-        self._ids = {lang: () for lang in self.languages}
+-        self._stamps = {}
+-        self._next_check = 0.0
+-        self._interest = {}                                      # (lang, book_id) -> [score, last_seen]
+-        self.scan()
++        self.root.mkdir(parents=True, exist_ok=True)
++        self._local = threading.local()
++        self._cache = OrderedDict()                     # idx file -> offsets array (small LRU)
++        self._cache_lock = threading.Lock()
++        self._ids, self._ids_version = {}, {}
++        self._interest = {}                             # (lang, book_id) -> [score, last_seen]
++        self._seen_version = -1
++        with self._conn() as c:
++            c.execute("""CREATE TABLE IF NOT EXISTS books (lang TEXT NOT NULL, book_id TEXT NOT NULL, file TEXT NOT NULL,
++                bytes INTEGER, passages INTEGER, content_hash TEXT, segment_version TEXT, edition_key TEXT, prepared_at REAL,
++                external INTEGER, book TEXT, PRIMARY KEY (lang, book_id))""")
++            c.execute("CREATE INDEX IF NOT EXISTS books_age ON books (lang, external, prepared_at)")
++            c.execute("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY CHECK (id = 1), v INTEGER)")
++            c.execute("INSERT OR IGNORE INTO counter VALUES (1, 0)")
++
++    # ---- plumbing ----------------------------------------------------------------------------
++    def _conn(self):
++        conn = getattr(self._local, "conn", None)
++        if conn is None:
++            conn = sqlite3.connect(self.root / "library.sqlite", timeout=10, isolation_level=None, check_same_thread=False)
++            conn.execute("PRAGMA journal_mode=WAL")
++            conn.execute("PRAGMA synchronous=NORMAL")
++            self._local.conn = conn
++        return conn
+ 
+-    # ---- discovery ---------------------------------------------------------------------------
+     def _folder(self, language):
+         return self.root / language
+ 
+-    def _valid_meta(self, folder, meta):
+-        try:
+-            path = folder / meta["file"]
+-            return (isinstance(meta.get("book_id"), str) and path.is_file()
+-                    and path.stat().st_size == meta["bytes"] and len(meta["offsets"]) == meta["passages"] + 1
+-                    and meta["passages"] > 0)
+-        except (KeyError, TypeError, OSError):
+-            return False
++    @property
++    def version(self):
++        """Changes whenever any process publishes or retires a book (cheap: one tiny SELECT)."""
++        return self._conn().execute("SELECT v FROM counter WHERE id=1").fetchone()[0]
+ 
+-    def scan(self):
+-        """Rebuild the index from disk. Safe to call at any time."""
+-        changed = False
+-        with self._lock:
+-            for lang in self.languages:
+-                folder = self._folder(lang)
+-                found = {}
+-                try:
+-                    stamp = folder.stat().st_mtime_ns
+-                    names = sorted(folder.glob("*.meta.json"))
+-                except OSError:
+-                    stamp, names = None, []
+-                for path in names:
+-                    try:
+-                        meta = json.loads(path.read_text(encoding="utf-8"))
+-                    except (OSError, ValueError):
+-                        continue
+-                    if isinstance(meta, dict) and self._valid_meta(folder, meta):
+-                        found[meta["book_id"]] = meta
+-                signature = {k: (m["content_hash"], m["segment_version"]) for k, m in found.items()}
+-                old = {k: (m["content_hash"], m["segment_version"]) for k, m in self._index[lang].items()}
+-                if signature != old:
+-                    changed = True
+-                self._index[lang] = found
+-                self._ids[lang] = tuple(sorted(found))
+-                self._stamps[lang] = stamp
+-            if changed:
+-                self.version += 1
++    def refresh_if_changed(self):
++        """True when another process changed the library since this was last called."""
++        v = self.version
++        changed = v != self._seen_version
++        self._seen_version = v
+         return changed
+ 
+-    def refresh_if_changed(self):
+-        """Cheap check (one stat per language, throttled) for books published by another process."""
+-        now = time.monotonic()
+-        if now < self._next_check:
+-            return False
+-        self._next_check = now + self.scan_interval
+-        for lang in self.languages:
+-            try:
+-                stamp = self._folder(lang).stat().st_mtime_ns
+-            except OSError:
+-                stamp = None
+-            if stamp != self._stamps.get(lang):
+-                return self.scan()
+-        return False
++    def scan(self):
++        return self.refresh_if_changed()
++
++    @staticmethod
++    def _meta(language, row):
++        book_id, file, size, passages, chash, segver, edition, prepared, external, book = row
++        return {"book_id": book_id, "language": language, "file": file, "bytes": size, "passages": passages,
++                "content_hash": chash, "segment_version": segver, "edition_key": edition, "prepared_at": prepared,
++                "external": bool(external), "book": json.loads(book) if book else None}
+ 
+     # ---- reading -----------------------------------------------------------------------------
+     def ids(self, language):
+-        return self._ids.get(language, ())
++        v = self.version
++        if self._ids_version.get(language) != v:
++            rows = self._conn().execute("SELECT book_id FROM books WHERE lang=? ORDER BY book_id", (language,)).fetchall()
++            self._ids[language], self._ids_version[language] = tuple(r[0] for r in rows), v
++        return self._ids[language]
++
++    def external_ids(self, language):
++        return [r[0] for r in self._conn().execute("SELECT book_id FROM books WHERE lang=? AND external=1", (language,))]
+ 
+     def count(self, language):
+-        return len(self._ids.get(language, ()))
++        return self._conn().execute("SELECT COUNT(*) FROM books WHERE lang=?", (language,)).fetchone()[0]
+ 
+     def has(self, language, book_id):
+-        return book_id in self._index.get(language, {})
++        return self._conn().execute("SELECT 1 FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone() is not None
+ 
+     def meta(self, language, book_id):
+-        return self._index.get(language, {}).get(book_id)
++        row = self._conn().execute(f"SELECT {COLUMNS} FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        return self._meta(language, row) if row else None
+ 
+     def passage_count(self, language, book_id):
+-        meta = self.meta(language, book_id)
+-        return meta["passages"] if meta else 0
++        row = self._conn().execute("SELECT passages FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        return row[0] if row else 0
++
++    def _offsets(self, path):
++        with self._cache_lock:
++            hit = self._cache.get(path)
++            if hit is not None:
++                self._cache.move_to_end(path)
++                return hit
++        offsets = array("I")
++        with open(path, "rb") as handle:
++            offsets.frombytes(handle.read())
++        with self._cache_lock:
++            self._cache[path] = offsets
++            while len(self._cache) > OFFSET_CACHE:
++                self._cache.popitem(last=False)
++        return offsets
+ 
+     def read_passage(self, language, book_id, index):
+         """One passage by number, or None if the book or passage is missing."""
+-        meta = self.meta(language, book_id)
+-        if not meta or not 0 <= index < meta["passages"]:
++        row = self._conn().execute("SELECT file, passages, bytes FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        if not row or not 0 <= index < row[1]:
+             return None
+-        start, end = meta["offsets"][index], meta["offsets"][index + 1]
++        folder, name = self._folder(language), row[0]
+         try:
+-            with (self._folder(language) / meta["file"]).open("rb") as handle:
+-                handle.seek(start)
+-                return handle.read(end - start).decode("utf-8")
+-        except OSError:
+-            self.scan()          # the file vanished (replaced or retired by another process)
++            offsets = self._offsets(folder / (name[:-4] + ".idx"))
++            with (folder / name).open("rb") as handle:
++                if os.fstat(handle.fileno()).st_size != row[2]:       # truncated or damaged: never serve half a book
++                    raise OSError("size mismatch")
++                handle.seek(offsets[index])
++                return handle.read(offsets[index + 1] - offsets[index]).decode("utf-8")
++        except (OSError, IndexError, UnicodeDecodeError):
++            self.retire(language, book_id)           # the files vanished or are damaged: forget this book so it can be rebuilt
+             return None
+ 
+     def is_current(self, language, book_id, content_hash, segment_version):
+-        meta = self.meta(language, book_id)
+-        return bool(meta and meta["content_hash"] == content_hash and meta["segment_version"] == segment_version)
+-
+-    def external_ids(self, language):
+-        return [k for k, m in self._index.get(language, {}).items() if m.get("external")]
++        row = self._conn().execute("SELECT content_hash, segment_version FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        return bool(row and row[0] == content_hash and row[1] == segment_version)
+ 
+     # ---- writing -----------------------------------------------------------------------------
+-    def publish(self, language, book_id, passages, *, edition_key, content_hash, segment_version,
+-                external=False, book=None):
+-        """Write a prepared book and only then mark it ready. Returns the meta."""
++    def publish(self, language, book_id, passages, *, edition_key, content_hash, segment_version, external=False, book=None):
++        """Write a prepared book and only then mark it ready. Returns its meta."""
+         if not passages:
+             raise ValueError("Cannot publish a book with no passages.")
+         folder = self._folder(language)
+         folder.mkdir(parents=True, exist_ok=True)
+-        safe = safe_name(book_id)
+-        data_name = f"{safe}.{content_hash[:8]}.{segment_version}.txt"
++        stem = f"{safe_name(book_id)}.{content_hash[:8]}.{segment_version}"
+         blobs = [p.encode("utf-8") for p in passages]
+-        offsets, total = [0], 0
++        offsets, total = array("I", [0]), 0
+         for blob in blobs:
+             total += len(blob)
+             offsets.append(total)
+         pid = f"{os.getpid()}.{threading.get_ident()}"
+-        tmp_data = folder / f".{data_name}.{pid}.tmp"
+-        with tmp_data.open("wb") as handle:
++        tmp_txt, tmp_idx = folder / f".{stem}.{pid}.txt.tmp", folder / f".{stem}.{pid}.idx.tmp"
++        with tmp_txt.open("wb") as handle:
+             for blob in blobs:
+                 handle.write(blob)
+-            handle.flush()
+-            os.fsync(handle.fileno())
+-        os.replace(tmp_data, folder / data_name)
+-        meta = {
+-            "book_id": book_id, "language": language, "file": data_name, "bytes": total, "passages": len(passages),
+-            "offsets": offsets, "edition_key": edition_key, "content_hash": content_hash,
+-            "segment_version": segment_version, "prepared_at": time.time(), "external": bool(external),
+-            "book": book if external else None,
+-        }
+-        meta_path = folder / f"{safe}.meta.json"
+-        previous = self.meta(language, book_id)
+-        tmp_meta = folder / f".{safe}.meta.{pid}.tmp"
+-        tmp_meta.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+-        os.replace(tmp_meta, meta_path)               # <- the moment the book becomes ready
+-        with self._lock:
+-            self._index[language][book_id] = meta
+-            self._ids[language] = tuple(sorted(self._index[language]))
+-            self.version += 1
+-        if previous and previous.get("file") != data_name:
++            handle.flush(); os.fsync(handle.fileno())
++        tmp_idx.write_bytes(offsets.tobytes())
++        os.replace(tmp_txt, folder / (stem + ".txt"))
++        os.replace(tmp_idx, folder / (stem + ".idx"))
++        previous = self._conn().execute("SELECT file FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        now = time.time()
++        c = self._conn()
++        c.execute("BEGIN IMMEDIATE")
++        try:
++            c.execute("""INSERT OR REPLACE INTO books (lang, book_id, file, bytes, passages, content_hash, segment_version, edition_key,
++                         prepared_at, external, book) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
++                      (language, book_id, stem + ".txt", total, len(passages), content_hash, segment_version, edition_key, now,
++                       1 if external else 0, json.dumps(book, ensure_ascii=False) if external and book else None))
++            c.execute("UPDATE counter SET v = v + 1 WHERE id = 1")
++            c.execute("COMMIT")                       # <- the moment the book becomes ready, for every process
++        except Exception:
++            c.execute("ROLLBACK")
++            raise
++        if previous and previous[0] != stem + ".txt":
++            self._remove_files(folder, previous[0])
++        return self.meta(language, book_id)
++
++    def _remove_files(self, folder, name):
++        for suffix in (name, name[:-4] + ".idx"):
+             try:
+-                (folder / previous["file"]).unlink()
++                (folder / suffix).unlink()
+             except OSError:
+                 pass
+-        return meta
++        with self._cache_lock:
++            self._cache.pop(folder / (name[:-4] + ".idx"), None)
+ 
+     def retire(self, language, book_id):
+-        """Remove a prepared copy (cache policy or stale rights). The only thing removed is this shelf copy."""
+-        meta = self.meta(language, book_id)
+-        folder, safe = self._folder(language), safe_name(book_id)
++        """Remove a prepared copy (cache policy, damaged files, or withdrawn rights). Only this library copy goes."""
++        c = self._conn()
++        row = c.execute("SELECT file FROM books WHERE lang=? AND book_id=?", (language, book_id)).fetchone()
++        c.execute("BEGIN IMMEDIATE")
+         try:
+-            (folder / f"{safe}.meta.json").unlink()
+-        except OSError:
+-            pass
+-        if meta:
+-            try:
+-                (folder / meta["file"]).unlink()
+-            except OSError:
+-                pass
+-        with self._lock:
+-            self._index[language].pop(book_id, None)
+-            self._ids[language] = tuple(sorted(self._index[language]))
+-            self.version += 1
++            c.execute("DELETE FROM books WHERE lang=? AND book_id=?", (language, book_id))
++            c.execute("UPDATE counter SET v = v + 1 WHERE id = 1")
++            c.execute("COMMIT")
++        except Exception:
++            c.execute("ROLLBACK")
++            raise
++        if row:
++            self._remove_files(self._folder(language), row[0])
+ 
+     # ---- interest and retention --------------------------------------------------------------
+     def note_interest(self, language, book_id, kind):
+         weight = INTEREST_WEIGHTS.get(kind, 0.0)
+         if weight:
+-            with self._lock:
+-                entry = self._interest.setdefault((language, book_id), [0.0, 0.0])
+-                entry[0] += weight
+-                entry[1] = time.time()
++            entry = self._interest.setdefault((language, book_id), [0.0, 0.0])
++            entry[0] += weight
++            entry[1] = time.time()
+ 
+     def interest_score(self, language, book_id):
+         entry = self._interest.get((language, book_id))
+         return entry[0] if entry else 0.0
+ 
+     def evict_cold(self, language, max_cold):
+-        """Keep at most `max_cold` on-demand books; retire the OLDEST first. Age only: interest never decides
+-        what stays, so the lake remains an unbiased sample of the catalogue."""
+-        cold = self.external_ids(language)
+-        excess = len(cold) - max(0, int(max_cold))
++        """Keep at most `max_cold` on-demand books; retire the OLDEST first. Age only: interest never decides what stays,
++        so the library remains an unbiased sample of the catalogue."""
++        c = self._conn()
++        total = c.execute("SELECT COUNT(*) FROM books WHERE lang=? AND external=1", (language,)).fetchone()[0]
++        excess = total - max(0, int(max_cold))
+         if excess <= 0:
+             return []
+-        victims = sorted(cold, key=lambda bid: self._index[language][bid]["prepared_at"])[:excess]
++        victims = [r[0] for r in c.execute("SELECT book_id FROM books WHERE lang=? AND external=1 ORDER BY prepared_at LIMIT ?", (language, excess))]
+         for bid in victims:
+             self.retire(language, bid)
+         return victims
++
++    def _set_prepared_at(self, language, book_id, stamp):      # used by tests
++        self._conn().execute("UPDATE books SET prepared_at=? WHERE lang=? AND book_id=?", (stamp, language, book_id))
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/source.py stage2b/source.py
+--- stage1/source.py	2026-11-14 00:28:35.706092998 +0000
++++ stage2b/source.py	2026-11-14 10:31:35.116167721 +0000
+@@ -50,6 +50,38 @@
+             self._sleep(delay)
+ 
+ 
++class SharedRateGate:
++    """A RateGate that holds across processes on one machine (several Gunicorn workers + worker.py): a lock file keeps
++    the time of the last download start, so the courtesy gap toward Gutenberg is global, not per process."""
++
++    def __init__(self, path, min_interval=2.0, sleep=time.sleep):
++        self.path, self.min_interval, self._sleep = path, float(min_interval), sleep
++        self._fallback = RateGate(min_interval, sleep=sleep)
++        try:
++            import fcntl
++            self._fcntl = fcntl
++        except ImportError:                       # e.g. Windows: fall back to a per-process gate
++            self._fcntl = None
++
++    def wait(self):
++        if not self._fcntl or self.min_interval <= 0:
++            return self._fallback.wait()
++        with open(self.path, "a+") as handle:
++            self._fcntl.flock(handle, self._fcntl.LOCK_EX)         # one download start at a time, machine-wide
++            try:
++                handle.seek(0)
++                try:
++                    last = float(handle.read().strip() or 0)
++                except ValueError:
++                    last = 0.0
++                delay = last + self.min_interval - time.time()
++                if delay > 0:
++                    self._sleep(delay)
++                handle.seek(0); handle.truncate(); handle.write(repr(time.time())); handle.flush()
++            finally:
++                self._fcntl.flock(handle, self._fcntl.LOCK_UN)
++
++
+ def trusted_url(value):
+     try:
+         p = urlparse(value)
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/tests/test_core.py stage2b/tests/test_core.py
+--- stage1/tests/test_core.py	2026-11-14 00:28:35.682578708 +0000
++++ stage2b/tests/test_core.py	2026-11-14 10:31:35.133751877 +0000
+@@ -1,5 +1,6 @@
+ """Run all tests:  python -m unittest discover -s tests -t . -v"""
+ import hashlib
++import os
+ import json
+ import random
+ import shutil
+@@ -87,7 +88,9 @@
+         s = ReadyShelf(self.tmp.name)
+         s.publish("en", "x", ["abc"], edition_key="e", content_hash="a" * 64, segment_version="v1")
+         data = next((Path(self.tmp.name) / "en").glob("*.txt")); data.write_bytes(b"ab")   # truncated
+-        self.assertEqual(ReadyShelf(self.tmp.name).ids("en"), ())
++        other = ReadyShelf(self.tmp.name)
++        self.assertIsNone(other.read_passage("en", "x", 0))                              # never half a book...
++        self.assertEqual(other.ids("en"), ()); self.assertEqual(s.ids("en"), ())          # ...and it is forgotten so it can be rebuilt
+ 
+     def test_other_process_changes_are_picked_up(self):
+         a, b = ReadyShelf(self.tmp.name, scan_interval=0), ReadyShelf(self.tmp.name, scan_interval=0)
+@@ -98,7 +101,7 @@
+         s = ReadyShelf(self.tmp.name)
+         for i in range(4):
+             s.publish("en", f"c{i}", ["p"], edition_key="e", content_hash=str(i) * 64, segment_version="v", external=True, book={"id": f"c{i}"})
+-            s._index["en"][f"c{i}"]["prepared_at"] = 1000 + i
++            s._set_prepared_at("en", f"c{i}", 1000 + i)
+         s.publish("en", "local", ["p"], edition_key="e", content_hash="9" * 64, segment_version="v")
+         s.note_interest("en", "c0", "saved")                       # interest must NOT keep the oldest alive
+         self.assertEqual(sorted(s.evict_cold("en", 2)), ["c0", "c1"])
+@@ -547,7 +550,7 @@
+         for i in range(6):
+             self.rt.shelf.publish("en", f"pg-en-{900 + i}", ["p"], edition_key="e", content_hash=str(i) * 64, segment_version="v",
+                                   external=True, book={"id": f"pg-en-{900 + i}", "title": "t", "text_url": "x", "rights_status": "approved"})
+-            self.rt.shelf._index["en"][f"pg-en-{900 + i}"]["prepared_at"] = 1000 + i
++            self.rt.shelf._set_prepared_at("en", f"pg-en-{900 + i}", 1000 + i)
+         self.rt.shelf.note_interest("en", "pg-en-900", "saved")                  # interest must not keep the oldest
+         w.maintenance()
+         self.assertEqual(sorted(w.lake_ids("en")), ["pg-en-903", "pg-en-904", "pg-en-905"])
+@@ -616,6 +619,135 @@
+         res = self.post("/api/draw", count=3); self.assertEqual(res["mode"], "starter"); self.assertEqual(len(res["tickets"]), 3)
+ 
+ 
++class HardeningTests(OceanBase):
++    """Several web processes sharing one instance folder (what Gunicorn does), plus the safety nets."""
++
++    def second_process(self):
++        other = create_app(self.config)               # a second Runtime on the same folder = a second Gunicorn worker
++        other.runtime.worker.rng = random.Random(9)
++        return other
++
++    def test_a_poll_answered_by_another_process_sees_real_progress_and_then_the_book(self):
++        other = self.second_process(); client_b = other.test_client()
++        res = self.post("/api/draw", count=2); handles = [p["handle"] for p in res["pending"]]       # process A takes the draw
++        seen = client_b.post("/api/draw/poll", json={"handles": handles}).get_json()["results"]      # process B answers the poll
++        self.assertEqual([r["state"] for r in seen], ["working", "working"])
++        self.assertEqual([r["ahead"] for r in seen], [0, 1])
++        self.rt.worker.run_pending()                                                                   # A prepares the books
++        done = client_b.post("/api/draw/poll", json={"handles": handles}).get_json()["results"]
++        self.assertEqual([r["state"] for r in done], ["ready", "ready"]); self.assertTrue(all(r["ticket"]["text"] for r in done))
++
++    def test_two_processes_wanting_the_same_cold_book_download_it_once(self):
++        other = self.second_process()
++        record = self.rt.universe.random_candidates("en", 1, random.Random(4))[0]
++        self.rt.worker.enqueue(prep.COLD, "en", record, 0); other.runtime.worker.enqueue(prep.COLD, "en", record, 0)
++        self.rt.worker.run_pending(); other.runtime.worker.run_pending()
++        self.assertEqual(self.fetched.count(record["gutenberg_id"]), 1)
++        self.assertTrue(other.runtime.shelf.has("en", record["id"]))
++
++    def test_the_library_index_needs_no_file_scan_to_start(self):
++        for i in range(50):
++            self.rt.shelf.publish("en", f"pg-en-{700 + i}", ["p"], edition_key="e", content_hash=f"{i:064d}", segment_version="v",
++                                  external=True, book={"id": f"pg-en-{700 + i}", "title": "t", "text_url": "x", "rights_status": "approved"})
++        for f in (Path(self.config["INSTANCE_DIR"]) / "ready" / "en").glob("pg-en-7*"):
++            f.unlink()                                                                       # no book file is needed just to open the library
++        fresh = ReadyShelf(Path(self.config["INSTANCE_DIR"]) / "ready")
++        self.assertGreaterEqual(fresh.count("en"), 50)
++        self.assertIsNone(fresh.read_passage("en", "pg-en-700", 0))                         # missing files are noticed and forgotten
++        self.assertFalse(fresh.has("en", "pg-en-700"))
++
++    def test_circuit_breaker_pauses_downloads_after_a_run_of_temporary_failures_and_recovers(self):
++        w = self.rt.worker; w.settings.breaker_threshold, w.settings.breaker_seconds, w.settings.max_attempts = 3, 60, 99
++        clock = [10_000.0]; w._clock = lambda: clock[0]
++        state = {"down": True, "calls": 0}
++        def flaky(book):
++            state["calls"] += 1
++            if state["down"]:
++                raise source.TransientSourceError("HTTP 503")
++            return source.clean_for_language(fake_gutenberg(book["title"], seed=book["gutenberg_id"], paragraphs=60), "en")
++        w._fetch = flaky
++        for i in range(3):
++            w.enqueue(prep.COLD, "en", self.rt.universe.random_candidates("en", 1, random.Random(i + 20))[0], 5)
++        w.run_pending(); self.assertTrue(w.breaker_open())
++        self.assertGreater(w.estimated_wait(), w.settings.max_cold_wait)                      # new draws now shed to prepared books
++        calls = state["calls"]; w.run_pending(); self.assertEqual(state["calls"], calls)       # paused: no download starts
++        clock[0] += 100; state["down"] = False
++        self.assertFalse(w.breaker_open()); w.run_pending()
++        self.assertGreater(len(w.lake_ids("en")), 0); self.assertEqual(w._fail_streak, 0)
++
++    def test_the_download_gap_is_shared_by_every_process(self):
++        import threading
++        gate_a = source.SharedRateGate(Path(self.tmp.name) / ".g", 0.15); gate_b = source.SharedRateGate(Path(self.tmp.name) / ".g", 0.15)
++        stamps = []
++        def hit(gate):
++            for _ in range(3):
++                gate.wait(); stamps.append(time.time())
++        ts = [threading.Thread(target=hit, args=(g,)) for g in (gate_a, gate_b)]
++        [t.start() for t in ts]; [t.join() for t in ts]
++        stamps.sort(); gaps = [b - a for a, b in zip(stamps, stamps[1:])]
++        self.assertEqual(len(stamps), 6); self.assertGreater(min(gaps), 0.12)
++
++    def test_job_store_hides_finished_jobs_and_fails_abandoned_ones(self):
++        import jobstate
++        clock = [1000.0]; store = jobstate.JobStore(Path(self.tmp.name) / "j.sqlite", clock=lambda: clock[0])
++        store.upsert("k1", "en", "tokA", "cold", "running", "fetching", 40, prio=0)
++        store.upsert("k2", "en", "tokB", "cold", "queued", "queued", 6, prio=0)
++        self.assertEqual(store.view("en", "tokB")["ahead"], 1); self.assertEqual(store.pending_cold(), 2)
++        clock[0] += 1000; store.prune()
++        self.assertEqual(store.view("en", "tokA")["state"], "failed")                          # nobody finished it: reported, not stuck
++        clock[0] += 1000; store.prune(); self.assertIsNone(store.view("en", "tokA"))           # and the table never grows
++
++
++class ConditionalCatalogueTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup); self.dir = Path(self.tmp.name)
++        self.raw = write_catalog_csv(self.dir / "src.csv.gz", en=30, fr=3, zh=2).read_bytes()
++
++    def test_an_unchanged_catalogue_is_not_downloaded_again(self):
++        import urllib.error
++        sent = []
++        def opener(req, timeout):
++            sent.append(dict(req.header_items()))
++            if req.get_header("If-none-match"):
++                raise urllib.error.HTTPError(req.full_url, 304, "Not Modified", {}, None)
++            resp = SourceTests.Resp(self.raw); resp.headers["ETag"] = '"abc"'; resp.headers["Last-Modified"] = "Fri, 13 Nov 2026 00:00:00 GMT"
++            return resp
++        dest = self.dir / "got.csv.gz"
++        catalogue_csv.download(dest, opener=opener)                                            # first time: the whole file
++        with self.assertRaises(catalogue_csv.NotModified):
++            catalogue_csv.download(dest, opener=opener)                                        # second time: "has it changed?" -> no
++        self.assertEqual(sent[1]["If-none-match"], '"abc"'); self.assertEqual(sent[1]["If-modified-since"], "Fri, 13 Nov 2026 00:00:00 GMT")
++
++    def test_sync_records_the_catalogue_as_fresh_without_rebuilding(self):
++        import urllib.error
++        state = {"n": 0}
++        def opener(req, timeout):
++            state["n"] += 1
++            if state["n"] > 1:
++                raise urllib.error.HTTPError(req.full_url, 304, "Not Modified", {}, None)
++            resp = SourceTests.Resp(self.raw); resp.headers["ETag"] = '"abc"'; return resp
++        cfg = dict(TESTING=True, INSTANCE_DIR=self.dir / "inst", DB_PATH=self.dir / "a.db", BOOKS=[], DATA_DIR=self.dir / "data",
++                   EMBEDDED_WORKER=False, EN_TEXTS_DIR=self.dir / "t", TEXTS_DIR=self.dir / "t", SYNC_KWARGS={"opener": opener})
++        rt = create_app(cfg).runtime
++        self.assertTrue(rt.sync.run()); built = rt.universe_path.stat().st_ino
++        rt.sync._clock = lambda: time.time() + 3 * 86400; self.assertTrue(rt.sync.needs_run())
++        rt.sync._clock = time.time
++        os.utime(rt.universe_path, None)
++        self.assertTrue(rt.sync.run())
++        self.assertEqual(rt.sync.status()["message"], "Gutenberg catalogue is up to date.")
++        self.assertEqual(rt.universe.count("en"), 30)
++
++
++class SecretKeyTests(unittest.TestCase):
++    def test_workers_starting_at_the_same_moment_get_the_same_key(self):
++        import threading, runtime
++        d = Path(tempfile.mkdtemp()); keys = []
++        os.environ.pop("LR_SECRET_KEY", None)
++        ts = [threading.Thread(target=lambda: keys.append(runtime.load_secret(d))) for _ in range(12)]
++        [t.start() for t in ts]; [t.join() for t in ts]
++        self.assertEqual(len(set(keys)), 1); self.assertEqual(len(keys), 12)
++
++
+ class SourceTests(unittest.TestCase):
+     class Resp:
+         def __init__(self, body, ctype="text/plain", length=True):
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/universe.py stage2b/universe.py
+--- stage1/universe.py	2026-11-14 00:28:35.706109489 +0000
++++ stage2b/universe.py	2026-11-14 10:31:35.116367846 +0000
+@@ -171,6 +171,17 @@
+     return counts
+ 
+ 
++def touch(db_path, generated_at=None):
++    """The catalogue was checked and is unchanged: record 'fresh as of now' without rebuilding anything."""
++    import sqlite3 as _sqlite
++    conn = _sqlite.connect(db_path, timeout=10)
++    try:
++        conn.execute("UPDATE info SET value=? WHERE key='generated_at'", (generated_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),))
++        conn.commit()
++    finally:
++        conn.close()
++
++
+ class Universe:
+     """Read-only view of universe.sqlite. Cheap to create; safe across threads; reloads when the file changes."""
+ 
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage1/wsgi.py stage2b/wsgi.py
+--- stage1/wsgi.py	1970-01-01 00:00:00.000000000 +0000
++++ stage2b/wsgi.py	2026-11-14 10:31:35.137654143 +0000
+@@ -0,0 +1,4 @@
++"""WSGI entry point for Gunicorn:  gunicorn -c gunicorn.conf.py wsgi:app"""
++from app import create_app
++
++app = create_app()

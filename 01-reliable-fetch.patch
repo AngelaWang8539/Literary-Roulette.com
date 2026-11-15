@@ -1,0 +1,423 @@
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/app.py stage1/app.py
+--- lr-base/app.py	2026-11-14 00:26:28.904704578 +0000
++++ stage1/app.py	2026-11-14 00:28:35.706224884 +0000
+@@ -272,8 +272,11 @@
+                 continue
+             job = rt.worker.find_job(language, handle)
+             if job:
+-                results.append({"handle": handle, "state": "working", "stage": job.stage, "percent": job.percent,
+-                                "message": STAGE_TEXT.get(job.stage, "Working")})
++                message = STAGE_TEXT.get(job.stage, "Working") + (f" \u00b7 {job.detail}" if job.detail else "")
++                results.append({"handle": handle, "state": "working", "stage": job.stage,
++                                "percent": None if job.indeterminate else job.percent, "message": message,
++                                "ahead": rt.worker.ahead_of(job) if job.stage == "queued" else 0,
++                                "stalled": round(time.time() - job.last_move, 1)})
+             else:
+                 results.append({"handle": handle, "state": "failed",
+                                 "message": "That edition could not be fetched, so the librarian is drawing another."})
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/catalogue_csv.py stage1/catalogue_csv.py
+--- lr-base/catalogue_csv.py	2026-11-14 00:26:28.904850421 +0000
++++ stage1/catalogue_csv.py	2026-11-14 00:28:35.706309148 +0000
+@@ -8,6 +8,7 @@
+ import csv
+ import gzip
+ import os
++import time
+ import urllib.error
+ import urllib.request
+ from pathlib import Path
+@@ -27,13 +28,14 @@
+         progress(message, percent)
+ 
+ 
+-def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=60):
++def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=10, deadline=180):
+     """Download the catalogue to `dest` (atomically). Tries the alternate server if the main one fails."""
+     dest = Path(dest)
+     dest.parent.mkdir(parents=True, exist_ok=True)
+     tmp = dest.with_name(dest.name + f".{os.getpid()}.download")
+     last = None
+     for index, (name, url) in enumerate(urls):
++        started = time.monotonic()
+         try:
+             _say(progress, f"Connecting to {name} catalogue\u2026" if index == 0 else
+                  f"The main catalogue server is unavailable; trying {name}\u2026", 2)
+@@ -54,6 +56,10 @@
+                         if size:
+                             pct = int(got * 100 / size)
+                             _say(progress, f"Downloading catalogue from {name}\u2026 {pct}%", 5 + int(pct * 0.5))
++                        else:                                   # the server did not say how big: show bytes, never a stuck number
++                            _say(progress, f"Downloading catalogue from {name}\u2026 {got / 1e6:.1f} MB", None)
++                        if time.monotonic() - started > deadline:
++                            raise TimeoutError(f"{name} was too slow (over {deadline} s)")
+             gzip.open(tmp, "rb").read(64)                      # must really be gzip data
+             os.replace(tmp, dest)
+             return dest
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/prep.py stage1/prep.py
+--- lr-base/prep.py	2026-11-14 00:26:28.904118320 +0000
++++ stage1/prep.py	2026-11-14 00:28:35.706156890 +0000
+@@ -62,6 +62,7 @@
+         self.state, self.attempts, self.error = "queued", 0, None
+         self.queued_at, self.not_before = time.time(), 0.0
+         self.stage, self.percent = "queued", 6
++        self.detail, self.indeterminate, self.last_move = "", False, time.time()
+ 
+ 
+ class PrepWorker:
+@@ -286,8 +287,9 @@
+             self._cv.notify()
+             log.info("Will retry %s in %.0fs: %s", job.key, delay, job.error)
+ 
+-    def _set_stage(self, job, stage, percent):
++    def _set_stage(self, job, stage, percent, detail="", indeterminate=False):
+         job.stage, job.percent = stage, max(job.percent, percent) if stage == job.stage else percent
++        job.detail, job.indeterminate, job.last_move = detail, indeterminate, time.time()
+ 
+     def _prepare(self, job):
+         language, book = job.language, job.book
+@@ -304,7 +306,11 @@
+             with self._downloads:               # bounded concurrency toward the source
+                 self.gate.wait()
+                 if self._fetch_reports_progress:
+-                    report = lambda fraction: self._set_stage(job, "fetching", 12 + int(48 * min(1.0, max(0.0, fraction))))
++                    def report(fraction, got=None):
++                        if fraction is None:        # the server gave no size: report bytes, not an invented percentage
++                            self._set_stage(job, "fetching", job.percent, f"{(got or 0) / 1e6:.1f} MB", True)
++                        else:
++                            self._set_stage(job, "fetching", 12 + int(48 * min(1.0, max(0.0, fraction))))
+                     text = self._fetch(book, progress=report)
+                 else:
+                     text = self._fetch(book)
+@@ -383,6 +389,12 @@
+                     return None
+         return None
+ 
++    def ahead_of(self, job):
++        """How many cold books are being fetched or waiting in front of this one."""
++        with self._cv:
++            return sum(1 for j in self._jobs.values() if j is not job and j.kind == COLD and (
++                j.state == "running" or (j.state == "queued" and (j.priority, j.queued_at) < (job.priority, job.queued_at))))
++
+     def has_failed(self, language, book_token):
+         cat = self.catalogues[language]
+         with self._cv:
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/source.py stage1/source.py
+--- lr-base/source.py	2026-11-14 00:26:28.903655641 +0000
++++ stage1/source.py	2026-11-14 00:28:35.706092998 +0000
+@@ -16,6 +16,8 @@
+ END_RE = re.compile(r"\*{3,}\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK", re.I)
+ MIN_CHARS = {"zh": 300}
+ DEFAULT_MIN_CHARS = 500
++CONNECT_TIMEOUT = 8          # seconds to connect / to wait for any silent server before trying the next address
++TOTAL_DEADLINE = 45         # one download attempt never runs longer than this, however slowly it trickles
+ USER_AGENT = "LiteraryRoulette/0.6 (background text preparation; contact via the site's About page)"
+ 
+ 
+@@ -96,8 +98,12 @@
+     return cleaned if cleaned and len(cleaned.strip()) >= DEFAULT_MIN_CHARS else clean_gutenberg_text(text)
+ 
+ 
+-def download(url, gid, *, timeout=60, opener=urllib.request.urlopen, progress=None):
+-    """Fetch the raw bytes once. Raises Transient/PermanentSourceError."""
++def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, opener=urllib.request.urlopen, progress=None):
++    """Fetch the raw bytes once. Raises Transient/PermanentSourceError.
++
++    `progress(fraction, got_bytes)`: fraction is None when the server did not say how big the file is. A silent server
++    is given `timeout` seconds, and the whole attempt at most `deadline` seconds, so a stall can never hang a reader."""
++    started = time.monotonic()
+     if not trusted_url(url):
+         raise PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
+     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity", "Connection": "close"})
+@@ -115,8 +121,10 @@
+                     break
+                 chunks.append(chunk)
+                 got += len(chunk)
+-                if progress and size:
+-                    progress(got / size)
++                if progress:
++                    progress(got / size if size else None, got)
++                if time.monotonic() - started > deadline:
++                    raise TransientSourceError(f"eBook #{gid}: the server was too slow (over {deadline} s)")
+             raw = b"".join(chunks)
+     except urllib.error.HTTPError as exc:
+         if exc.code in (408, 425, 429, 500, 502, 503, 504):
+@@ -137,15 +145,17 @@
+     "not found" is the book given up on for good. A temporary problem (busy server) is raised so the worker retries later."""
+     language, gid = book["language"], book["gutenberg_id"]
+     urls = [u for u in (book.get("text_urls") or [book.get("text_url")]) if u]
+-    raw, last = None, None
+-    for url in urls:
++    raw, errors = None, []
++    for url in urls:                     # a slow, silent or missing address just means: try the next one
+         try:
+             raw = downloader(url, gid, progress=progress) if progress else downloader(url, gid)
+             break
+-        except PermanentSourceError as exc:
+-            last = exc
++        except SourceError as exc:
++            errors.append(exc)
+     if raw is None:
+-        raise last or PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
++        if errors and all(e.permanent for e in errors):
++            raise errors[-1]
++        raise next((e for e in reversed(errors) if not e.permanent), None) or PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
+     text = clean_for_language(decode_bytes(raw), language)
+     if len(text.strip()) < MIN_CHARS.get(language, DEFAULT_MIN_CHARS):
+         raise PermanentSourceError(f"eBook #{gid} did not yield enough readable text.")
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/static/js/app.js stage1/static/js/app.js
+--- lr-base/static/js/app.js	2026-11-14 00:26:28.759203148 +0000
++++ stage1/static/js/app.js	2026-11-14 00:28:35.705807773 +0000
+@@ -119,11 +119,15 @@
+       if (!p) return;
+       op.show();
+       const mode = STAGE_MODE[p.stage] || "load";
+-      const percent = p.stage === "queued" ? 25 : Math.min(95, 25 + Math.round(p.percent * 0.7));
+-      const text = p.stage === "queued" ? `Drawing number ${fmt(p.drawNumber)} of ${fmt(p.total)}` : (p.message || "Fetching this edition");
+-      op.update(text, { mode, percent });
++      const indeterminate = p.percent === null || p.percent === undefined;
++      const percent = indeterminate ? undefined : (p.stage === "queued" ? 25 : Math.min(95, 25 + Math.round(p.percent * 0.7)));
++      const text = p.stage === "queued"
++        ? (p.ahead > 0 ? `Waiting for a free librarian \u00b7 ${p.ahead} ahead` : `Drawing number ${fmt(p.drawNumber)} of ${fmt(p.total)}`)
++        : (p.message || "Fetching this edition");
++      op.update(text, { mode, percent, indeterminate });
+       announced = true;
+     },
++    onNotice: (text) => setStatus(text, "note"),
+   });
+   if (res.ok && pouch.info.mode === "starter") setTimeout(() => setStatus("The catalogue could not be opened, so this is a book from the small starter shelf. The librarian keeps trying.", "note"), 0);
+   return res;
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/static/js/i18n.js stage1/static/js/i18n.js
+--- lr-base/static/js/i18n.js	2026-11-14 00:26:28.852517901 +0000
++++ stage1/static/js/i18n.js	2026-11-14 00:28:35.705844303 +0000
+@@ -67,6 +67,9 @@
+     ["A library of {n} stories. One draw chooses the book; its name stays hidden. You have met {m}.", "一座拥有 {n} 个故事的图书馆。抽签决定哪本书，书名始终隐藏。你已遇见 {m} 本。", "Une bibliothèque de {n} histoires. Un tirage choisit le livre ; son titre reste caché. Vous en avez rencontré {m}."],
+     ["The librarian is opening the full catalogue. A small starter shelf is open in the meantime.", "图书管理员正在打开完整书库，期间先开放一小排入门书架。", "La bibliothécaire ouvre le catalogue complet. Une petite étagère de départ est ouverte en attendant."],
+     ["A library of stories. One draw chooses the book; a passage reveals it.", "故事的图书馆。抽签决定哪本书，一段文字揭晓它。", "Une bibliothèque d’histoires. Un tirage choisit le livre ; un passage le révèle."],
++    ["Waiting for a free librarian · {n} ahead", "等待空闲的图书管理员 · 前面还有 {n} 本", "En attente d’un bibliothécaire libre · {n} avant vous"],
++    ["Gutenberg is slow for this one, so the librarian is drawing another book.", "这本书古腾堡响应很慢，图书管理员正在另抽一本。", "Gutenberg est lent pour celui-ci ; la bibliothécaire tire un autre livre."],
++    ["Fetching this edition · {n} MB", "正在取来这一版 · {n} MB", "Récupération de cette édition · {n} Mo"],
+     ["Loading…", "加载中……", "Chargement…"],
+     ["Spin for a passage", "转一转，抽一段文字", "Tirer un passage"],
+     ["What would you like to do?", "你想做什么？", "Que souhaitez-vous faire ?"],
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/static/js/librarian.js stage1/static/js/librarian.js
+--- lr-base/static/js/librarian.js	2026-11-14 00:26:28.857854721 +0000
++++ stage1/static/js/librarian.js	2026-11-14 00:28:35.705884961 +0000
+@@ -48,7 +48,12 @@
+   timer = setInterval(() => { tickScene(scene, width); paint(); }, TICK_MS);
+ }
+ 
+-function setMeter(percent) {
++function setMeter(percent, indeterminate = false) {
++  if (indeterminate) {                                    // working, but the size is not known yet: a moving bar, no invented number
++    els.meter.hidden = false; els.bar.classList.add("indet"); els.fill.style.width = ""; els.pct.textContent = "";
++    els.bar.removeAttribute("aria-valuenow"); return;
++  }
++  els.bar.classList.remove("indet");
+   if (typeof percent !== "number") { els.meter.hidden = true; return; }
+   const p = Math.max(0, Math.min(100, Math.round(percent)));
+   els.meter.hidden = false; els.fill.style.width = p + "%"; els.pct.textContent = p + "%";
+@@ -67,7 +72,7 @@
+     startTicker();
+   }
+   els.caption.textContent = translate(op.message || "");
+-  setMeter(op.percent);
++  setMeter(op.percent, op.indeterminate);
+   if (reduced()) paint();
+ }
+ 
+@@ -100,6 +105,7 @@
+       if (text != null) op.message = text;
+       if (opts.mode) op.mode = opts.mode;
+       if ("percent" in opts) op.percent = opts.percent;
++      if ("indeterminate" in opts) op.indeterminate = !!opts.indeterminate;
+       if (op.visible && !op.ended) show(op);
+     },
+     done(text) {
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/static/js/tickets.js stage1/static/js/tickets.js
+--- lr-base/static/js/tickets.js	2026-11-14 00:26:28.857953826 +0000
++++ stage1/static/js/tickets.js	2026-11-14 00:28:35.705892847 +0000
+@@ -10,7 +10,7 @@
+ const sleepFor = (ms) => new Promise((r) => setTimeout(r, ms));
+ 
+ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxSeenBooks = 120, maxSeenPassages = 200,
+-                                    pollMs = 700, sleep = sleepFor }) {
++                                    pollMs = 700, sleep = sleepFor, stallMs = 25000, maxWaitMs = 70000 }) {
+   let queue = [], seenBooks = [], current = null, refilling = null, companion = null, bg = null;
+   const pending = new Map();                       // handle -> {startedAt, drawNumber, total, percent, stage, message}
+   const seenPassages = new Map();
+@@ -42,7 +42,11 @@
+       if (!p) continue;
+       if (r.state === "ready" && r.ticket) { addTicket(r.ticket); pending.delete(r.handle); }
+       else if (r.state === "failed") pending.delete(r.handle);
+-      else Object.assign(p, { percent: r.percent ?? p.percent, stage: r.stage || p.stage, message: r.message || p.message });
++      else {
++        const next = { percent: r.percent === undefined ? p.percent : r.percent, stage: r.stage || p.stage, message: r.message || p.message, ahead: r.ahead || 0 };
++        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message) p.movedAt = Date.now();   // it moved: not stalled
++        Object.assign(p, next);
++      }
+     }
+   }
+ 
+@@ -55,7 +59,7 @@
+         if (res.restarted) seenBooks = [];                          // the visitor has met every book: a fresh round
+         for (const t of res.tickets || []) addTicket(t);
+         for (const p of res.pending || []) {
+-          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: Date.now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "" });
++          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: Date.now(), movedAt: Date.now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "", ahead: 0 });
+         }
+         watchInBackground();
+       }
+@@ -74,9 +78,11 @@
+ 
+     /** The next different-book ticket. Waits (with progress callbacks) only if the pouch ran dry. While the
+      *  catalogue is still being opened (first run) it waits and reports the real progress through onOpening. */
+-    async next({ onProgress, onOpening } = {}) {
++    async next({ onProgress, onOpening, onNotice } = {}) {
++      const began = Date.now();
+       for (let guard = 0; guard < 600; guard++) {
+         if (queue.length) { return { ok: true, ticket: queue.shift() }; }
++        if (Date.now() - began > maxWaitMs) return { ok: false, code: "slow", message: "Project Gutenberg is very slow right now. Please try another spin in a moment." };
+         if (!pending.size) {
+           const res = await refill();
+           if (!res.ok) {
+@@ -89,6 +95,9 @@
+         onProgress?.(summary(), info);
+         await sleep(pollMs);
+         await pollOnce();
++        for (const [handle, p] of [...pending]) {      // watchdog: a book that has not moved for a long time is replaced, never waited on forever
++          if (Date.now() - p.movedAt > stallMs) { pending.delete(handle); onNotice?.("Gutenberg is slow for this one, so the librarian is drawing another book."); }
++        }
+       }
+       return { ok: false, code: "preparing", message: "The librarian is taking longer than expected. Please try again shortly." };
+     },
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/static/style.css stage1/static/style.css
+--- lr-base/static/style.css	2026-11-14 00:26:28.901472952 +0000
++++ stage1/static/style.css	2026-11-14 00:28:35.705910213 +0000
+@@ -294,3 +294,8 @@
+ .banner.warn { background: var(--tan); border-left-color: var(--ink); }
+ #storage-reason { color: var(--muted); font-size: .85em; }
+ .language-choice.is-planned { background: var(--panel); }
++
++/* a moving bar while a download has not said how big it is (never a stuck, invented percentage) */
++.librarian .bar.indet i { width: 35%; animation: lr-indet 1.3s ease-in-out infinite alternate; }
++@keyframes lr-indet { from { margin-left: 0; } to { margin-left: 65%; } }
++@media (prefers-reduced-motion: reduce) { .librarian .bar.indet i { animation: none; margin-left: 32%; } }
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/tests/js/front_tests.mjs stage1/tests/js/front_tests.mjs
+--- lr-base/tests/js/front_tests.mjs	2026-11-14 00:26:28.148517859 +0000
++++ stage1/tests/js/front_tests.mjs	2026-11-14 00:28:35.682751427 +0000
+@@ -65,6 +65,26 @@
+   assert.ok(res.ok); assert.deepEqual(opening.map((p) => p.percent), [20, 40]); pouch.stop();
+ });
+ 
++await test("a book that stops moving is replaced by a new draw instead of being waited on forever", async () => {
++  let draws = 0; const notes = [];
++  const api = async (path, body) => {
++    if (path === "/api/draw") { draws++; return draws === 1
++      ? { ok: true, mode: "ocean", total: 800, tickets: [], pending: [{ handle: "h1", draw_number: 1, total: 800 }] }
++      : { ok: true, mode: "ocean", total: 800, pending: [], tickets: [{ ticket: "t", token: "p", book_token: "b2", text: "fresh" }] }; }
++    if (path === "/api/draw/poll") return { ok: true, results: body.handles.map((h) => ({ handle: h, state: "working", stage: "fetching", percent: 12, message: "Fetching this edition" })) };
++  };
++  const pouch = createTicketPouch({ api, language: "en", pollMs: 2, sleep: () => sleep(2), stallMs: 40 });
++  const res = await pouch.next({ onNotice: (t) => notes.push(t) });
++  assert.ok(res.ok); assert.equal(res.ticket.text, "fresh"); assert.equal(draws, 2); assert.equal(notes.length, 1); pouch.stop();
++});
++await test("an unknown-size download shows as 'moving', and an overall cap ends a hopeless wait with a friendly message", async () => {
++  const api = async (path, body) => path === "/api/draw"
++    ? { ok: true, mode: "ocean", total: 800, tickets: [], pending: [{ handle: "h1", draw_number: 1, total: 800 }] }
++    : { ok: true, results: body.handles.map((h) => ({ handle: h, state: "working", stage: "fetching", percent: null, message: "Fetching this edition \u00b7 " + Math.random() })) };
++  const pouch = createTicketPouch({ api, language: "en", pollMs: 2, sleep: () => sleep(2), stallMs: 100000, maxWaitMs: 60 });
++  const seen = []; const res = await pouch.next({ onProgress: (p) => seen.push(p) });
++  assert.ok(seen.length > 2 && seen.slice(1).every((p) => p.percent === null)); assert.equal(res.ok, false); assert.equal(res.code, "slow"); pouch.stop();
++});
+ await test("refill avoids the book on screen and sends the visitor's own seen list", async () => {
+   const { api, calls } = fakeServer(); const pouch = createTicketPouch({ api, language: "fr", batch: 2 });
+   const a = await pouch.next(); pouch.shown(a.ticket); const b = await pouch.next(); pouch.shown(b.ticket); await sleep(5);
+@@ -104,8 +124,11 @@
+ // ---------------- librarian overlay: the one-second rule ----------------
+ function makeEl() {
+   const kids = {};
++  const cls = new Set();
+   const el = { hidden: true, textContent: "", innerHTML: "", clientWidth: 600, style: {}, attrs: {},
+-    setAttribute(k, v) { this.attrs[k] = v; }, querySelector(sel) { return kids[sel] || (kids[sel] = makeEl()); } };
++    classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) },
++    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
++    querySelector(sel) { return kids[sel] || (kids[sel] = makeEl()); } };
+   return el;
+ }
+ const root = makeEl();
+@@ -132,6 +155,13 @@
+   op.update("Downloading catalogue from Project Gutenberg\u2026 42%", { percent: 30 }); assert.equal(root.querySelector(".pct").textContent, "30%");
+   op.done(); await sleep(1700); assert.equal(root.hidden, true);
+ });
++await test("an unknown-size download shows a moving bar and no invented percentage", async () => {
++  const op = Librarian.begin("load", "x"); op.show();
++  op.update("Fetching this edition \u00b7 1.2 MB", { indeterminate: true, percent: undefined });
++  assert.ok(root.querySelector(".bar").classList.contains("indet")); assert.equal(root.querySelector(".pct").textContent, "");
++  op.update("Cleaning the text", { indeterminate: false, percent: 70 }); assert.ok(!root.querySelector(".bar").classList.contains("indet"));
++  assert.equal(root.querySelector(".pct").textContent, "70%"); op.done(); await sleep(1700);
++});
+ await test("a fast failure shows no drawing; a slow failure shows the friendly dropped-book scene", async () => {
+   Librarian.begin("load", "x").fail("nope"); assert.equal(root.hidden, true);
+   const op = Librarian.begin("load", "x"); await sleep(Librarian.SHOW_AFTER_MS + 100); op.fail("Could not reach the site.");
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' lr-base/tests/test_core.py stage1/tests/test_core.py
+--- lr-base/tests/test_core.py	2026-11-14 00:26:28.128517858 +0000
++++ stage1/tests/test_core.py	2026-11-14 00:28:35.682578708 +0000
+@@ -574,6 +574,15 @@
+     def test_history_is_capped_at_75(self):
+         self.assertIn("HISTORY_LIMIT = 75", Path("static/js/storage.js").read_text(encoding="utf-8"))
+ 
++    def test_poll_shows_bytes_when_the_size_is_unknown_and_the_queue_position_while_waiting(self):
++        res = self.post("/api/draw", count=3); handles = [p["handle"] for p in res["pending"]]
++        first = self.post("/api/draw/poll", handles=handles)["results"]
++        self.assertEqual([r["ahead"] for r in first], [0, 1, 2])                          # three picks queued one behind the other
++        job = self.rt.worker.find_job("en", handles[0])
++        self.rt.worker._set_stage(job, "fetching", job.percent, "1.2 MB", True)
++        r = self.post("/api/draw/poll", handles=handles[:1])["results"][0]
++        self.assertIsNone(r["percent"]); self.assertIn("1.2 MB", r["message"]); self.assertLess(r["stalled"], 5)
++
+     def test_stage_progress_never_goes_backwards(self):
+         job = prep.Job("k", prep.COLD, "en", {"id": "x"}, 0); w = self.rt.worker
+         w._set_stage(job, "fetching", 12); w._set_stage(job, "fetching", 40); w._set_stage(job, "fetching", 30)
+@@ -624,9 +633,28 @@
+ 
+     def test_download_reports_real_progress(self):
+         seen = []
+-        raw = source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000), progress=seen.append)
++        raw = source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000), progress=lambda f, got=None: seen.append(f))
+         self.assertEqual(len(raw), 200_000); self.assertEqual(seen[-1], 1.0); self.assertEqual(seen, sorted(seen))
+ 
++    def test_unknown_size_reports_bytes_not_a_stuck_percentage(self):
++        seen = []
++        source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000, length=False), progress=lambda f, got=None: seen.append((f, got)))
++        self.assertTrue(all(f is None for f, _ in seen)); self.assertEqual(seen[-1][1], 200_000)
++
++    def test_a_trickling_server_is_cut_off_by_the_deadline(self):
++        class Slow(self.Resp):
++            def read(self, n=-1):
++                time.sleep(0.03); return super().read(1000)
++        with self.assertRaises(source.TransientSourceError):
++            source.download(self.URL, 1, opener=lambda req, timeout: Slow(b"x" * 500_000), deadline=0.1)
++
++    def test_default_timeouts_are_short_so_a_silent_server_cannot_hang_a_reader(self):
++        self.assertLessEqual(source.CONNECT_TIMEOUT, 10); self.assertLessEqual(source.TOTAL_DEADLINE, 60)
++        seen = {}
++        def opener(req, timeout):
++            seen["timeout"] = timeout; return self.Resp(b"x" * 1000)
++        source.download(self.URL, 1, opener=opener); self.assertEqual(seen["timeout"], source.CONNECT_TIMEOUT)
++
+     def test_errors_are_classified_for_the_worker(self):
+         import urllib.error
+         def http(code):
+@@ -654,6 +682,12 @@
+         with self.assertRaises(source.PermanentSourceError): source.fetch_clean_text(book, downloader=none)
+         def busy(url, gid, **kw): raise source.TransientSourceError("HTTP 503")
+         with self.assertRaises(source.TransientSourceError): source.fetch_clean_text(book, downloader=busy)
++        calls = []
++        def slow_then_fine(url, gid, **kw):                               # the first address is silent/slow: fail over at once
++            calls.append(url)
++            if "dev." in url: raise source.TransientSourceError("timed out")
++            return text.encode("utf-8")
++        self.assertGreater(len(source.fetch_clean_text(book, downloader=slow_then_fine)), 500); self.assertEqual(len(calls), 2)
+ 
+ 
+ class FrontEndTests(unittest.TestCase):

@@ -1,0 +1,1657 @@
+{
+  "provider": "Gutendex / Project Gutenberg",
+  "generated_at": "2026-11-07T02:25:19+00:00",
+  "sync_complete": false,
+  "filters": {
+    "copyright": "false (US public-domain classification)",
+    "text_format": "text/plain filtered locally from Gutendex formats",
+    "topics": [],
+    "max_pages": 1,
+    "percentile_scope": "Per-language saved snapshot; partial when page limits or topic filters are used."
+  },
+  "languages": {
+    "en": [
+      {
+        "id": 1342,
+        "title": "Pride and Prejudice",
+        "authors": [
+          {
+            "name": "Austen, Jane"
+          }
+        ],
+        "subjects": [
+          "Courtship -- Fiction",
+          "Domestic fiction",
+          "England -- Fiction",
+          "Love stories",
+          "Sisters -- Fiction",
+          "Social classes -- Fiction",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Category: Romance",
+          "Harvard Classics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 208430,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1342.txt.utf-8"
+        }
+      },
+      {
+        "id": 84,
+        "title": "Frankenstein; or, The modern Prometheus",
+        "authors": [
+          {
+            "name": "Shelley, Mary Wollstonecraft"
+          }
+        ],
+        "subjects": [
+          "Frankenstein's monster (Fictitious character) -- Fiction",
+          "Frankenstein, Victor (Fictitious character) -- Fiction",
+          "Gothic fiction",
+          "Horror tales",
+          "Monsters -- Fiction",
+          "Science fiction",
+          "Scientists -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Gothic Fiction",
+          "Movie Books",
+          "Precursors of Science Fiction",
+          "Science Fiction by Women"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 182729,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/84.txt.utf-8"
+        }
+      },
+      {
+        "id": 2701,
+        "title": "Moby Dick; Or, The Whale",
+        "authors": [
+          {
+            "name": "Melville, Herman"
+          }
+        ],
+        "subjects": [
+          "Adventure stories",
+          "Ahab, Captain (Fictitious character) -- Fiction",
+          "Mentally ill -- Fiction",
+          "Psychological fiction",
+          "Sea stories",
+          "Ship captains -- Fiction",
+          "Whales -- Fiction",
+          "Whaling -- Fiction",
+          "Whaling ships -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: Adventure",
+          "Category: American Literature",
+          "Category: Classics of Literature",
+          "Category: Novels"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 168089,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2701.txt.utf-8"
+        }
+      },
+      {
+        "id": 11,
+        "title": "Alice's Adventures in Wonderland",
+        "authors": [
+          {
+            "name": "Carroll, Lewis"
+          }
+        ],
+        "subjects": [
+          "Alice (Fictitious character from Carroll) -- Juvenile fiction",
+          "Children's stories",
+          "Fantasy fiction",
+          "Imaginary places -- Juvenile fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Children & Young Adult Reading",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Children's Literature"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 121623,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/11.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/11/11-0.txt"
+        }
+      },
+      {
+        "id": 1661,
+        "title": "The Adventures of Sherlock Holmes",
+        "authors": [
+          {
+            "name": "Doyle, Arthur Conan"
+          }
+        ],
+        "subjects": [
+          "Detective and mystery stories, English",
+          "Holmes, Sherlock (Fictitious character) -- Fiction",
+          "Private investigators -- England -- Fiction"
+        ],
+        "bookshelves": [
+          "Banned Books from Anne Haight's list",
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Short Stories",
+          "Contemporary Reviews",
+          "Detective Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 96353,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1661.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1661/1661-0.txt"
+        }
+      },
+      {
+        "id": 37683,
+        "title": "Chambers's Twentieth Century Dictionary (part 1 of 4: A-D)",
+        "authors": [],
+        "subjects": [
+          "English language -- Dictionaries"
+        ],
+        "bookshelves": [
+          "Category: Encyclopedias/Dictionaries/Reference",
+          "Category: Language & Communication"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 94005,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/37683.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/37683/37683-8.txt"
+        }
+      },
+      {
+        "id": 1513,
+        "title": "Romeo and Juliet",
+        "authors": [
+          {
+            "name": "Shakespeare, William"
+          }
+        ],
+        "subjects": [
+          "Conflict of generations -- Drama",
+          "Juliet (Fictitious character) -- Drama",
+          "Romeo (Fictitious character) -- Drama",
+          "Tragedies (Drama)",
+          "Vendetta -- Drama",
+          "Verona (Italy) -- Drama",
+          "Youth -- Drama"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Plays/Films/Dramas",
+          "Category: Romance"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 81893,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1513.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1513/1513-0.txt"
+        }
+      },
+      {
+        "id": 345,
+        "title": "Dracula",
+        "authors": [
+          {
+            "name": "Stoker, Bram"
+          }
+        ],
+        "subjects": [
+          "Dracula, Count (Fictitious character) -- Fiction",
+          "Epistolary fiction",
+          "Gothic fiction",
+          "Horror tales",
+          "Transylvania (Romania) -- Fiction",
+          "Vampires -- Fiction",
+          "Whitby (England) -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Gothic Fiction",
+          "Horror",
+          "Movie Books",
+          "Mystery Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 78131,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/345.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/345/345-0.txt"
+        }
+      },
+      {
+        "id": 100,
+        "title": "The Complete Works of William Shakespeare",
+        "authors": [
+          {
+            "name": "Shakespeare, William"
+          }
+        ],
+        "subjects": [
+          "English drama -- Early modern and Elizabethan, 1500-1600"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Plays/Films/Dramas",
+          "Category: Poetry",
+          "Plays"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 76146,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/100.txt.utf-8"
+        }
+      },
+      {
+        "id": 43,
+        "title": "The strange case of Dr. Jekyll and Mr. Hyde",
+        "authors": [
+          {
+            "name": "Stevenson, Robert Louis"
+          }
+        ],
+        "subjects": [
+          "Horror tales",
+          "London (England) -- Fiction",
+          "Multiple personality -- Fiction",
+          "Physicians -- Fiction",
+          "Psychological fiction",
+          "Science fiction",
+          "Self-experimentation in medicine -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Horror",
+          "Movie Books",
+          "Precursors of Science Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 71859,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/43.txt.utf-8"
+        }
+      },
+      {
+        "id": 145,
+        "title": "Middlemarch",
+        "authors": [
+          {
+            "name": "Eliot, George"
+          }
+        ],
+        "subjects": [
+          "Bildungsromans",
+          "City and town life -- Fiction",
+          "Didactic fiction",
+          "Domestic fiction",
+          "England -- Fiction",
+          "Love stories",
+          "Married people -- Fiction",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Historical Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 70535,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/145.txt.utf-8"
+        }
+      },
+      {
+        "id": 49297,
+        "title": "The Works of William Shakespeare [Cambridge Edition] [Vol. 5 of 9]",
+        "authors": [
+          {
+            "name": "Shakespeare, William"
+          }
+        ],
+        "subjects": [
+          "English drama"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Historical Novels",
+          "Category: Plays/Films/Dramas"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 67762,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/49297.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/49297/49297-0.txt"
+        }
+      },
+      {
+        "id": 67979,
+        "title": "The Blue Castle: a novel",
+        "authors": [
+          {
+            "name": "Montgomery, L. M. (Lucy Maud)"
+          }
+        ],
+        "subjects": [
+          "Canada -- History -- 1914-1945 -- Fiction",
+          "Choice (Psychology) -- Fiction",
+          "Love -- Fiction",
+          "Romance fiction",
+          "Self-actualization (Psychology) -- Fiction",
+          "Single women -- Fiction",
+          "Young adult fiction"
+        ],
+        "bookshelves": [
+          "Category: Novels",
+          "Category: Romance"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 62659,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/67979.txt.utf-8"
+        }
+      },
+      {
+        "id": 2554,
+        "title": "Crime and Punishment",
+        "authors": [
+          {
+            "name": "Dostoyevsky, Fyodor"
+          }
+        ],
+        "subjects": [
+          "Crime -- Psychological aspects -- Fiction",
+          "Detective and mystery stories",
+          "Murder -- Fiction",
+          "Psychological fiction",
+          "Saint Petersburg (Russia) -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: Classics of Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Category: Russian Literature",
+          "Crime Fiction",
+          "Harvard Classics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 62172,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2554.txt.utf-8"
+        }
+      },
+      {
+        "id": 1260,
+        "title": "Jane Eyre: An Autobiography",
+        "authors": [
+          {
+            "name": "Brontë, Charlotte"
+          }
+        ],
+        "subjects": [
+          "Bildungsromans",
+          "Charity-schools -- Fiction",
+          "Country homes -- Fiction",
+          "England -- Fiction",
+          "Fathers and daughters -- Fiction",
+          "Governesses -- Fiction",
+          "Love stories",
+          "Married people -- Fiction",
+          "Mentally ill women -- Fiction",
+          "Orphans -- Fiction",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Category: Romance"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 57519,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1260.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1260/1260-0.txt"
+        }
+      },
+      {
+        "id": 37106,
+        "title": "Little Women; Or, Meg, Jo, Beth, and Amy",
+        "authors": [
+          {
+            "name": "Alcott, Louisa May"
+          }
+        ],
+        "subjects": [
+          "Autobiographical fiction",
+          "Bildungsromans",
+          "Domestic fiction",
+          "Family life -- New England -- Fiction",
+          "March family (Fictitious characters) -- Fiction",
+          "Mothers and daughters -- Fiction",
+          "New England -- Fiction",
+          "Sisters -- Fiction",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: American Literature",
+          "Category: Children & Young Adult Reading",
+          "Category: Classics of Literature",
+          "Category: Novels"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 57282,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/37106.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/37106/37106-0.txt"
+        }
+      },
+      {
+        "id": 2680,
+        "title": "Meditations",
+        "authors": [
+          {
+            "name": "Marcus Aurelius, Emperor of Rome"
+          }
+        ],
+        "subjects": [
+          "Ethics",
+          "Life",
+          "Stoics"
+        ],
+        "bookshelves": [
+          "Category: Biographies",
+          "Category: Classics of Literature",
+          "Category: Philosophy & Ethics",
+          "Harvard Classics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 53383,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2680.txt.utf-8"
+        }
+      },
+      {
+        "id": 1184,
+        "title": "The Count of Monte Cristo",
+        "authors": [
+          {
+            "name": "Dumas, Alexandre"
+          },
+          {
+            "name": "Maquet, Auguste"
+          }
+        ],
+        "subjects": [
+          "Adventure stories",
+          "Dantès, Edmond (Fictitious character) -- Fiction",
+          "France -- History -- 19th century -- Fiction",
+          "Historical fiction",
+          "Pirates -- Fiction",
+          "Prisoners -- Fiction",
+          "Revenge -- Fiction"
+        ],
+        "bookshelves": [
+          "Adventure",
+          "Category: Adventure",
+          "Category: Classics of Literature",
+          "Category: French Literature",
+          "Category: Novels",
+          "Movie Books"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 53145,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1184.txt.utf-8"
+        }
+      },
+      {
+        "id": 2641,
+        "title": "A Room with a View",
+        "authors": [
+          {
+            "name": "Forster, E. M. (Edward Morgan)"
+          }
+        ],
+        "subjects": [
+          "British -- Italy -- Fiction",
+          "England -- Fiction",
+          "Florence (Italy) -- Fiction",
+          "Humorous stories",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Novels",
+          "Category: Romance",
+          "Italy"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 52959,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2641.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/2641/2641-0.txt"
+        }
+      },
+      {
+        "id": 174,
+        "title": "The Picture of Dorian Gray",
+        "authors": [
+          {
+            "name": "Wilde, Oscar"
+          }
+        ],
+        "subjects": [
+          "Appearance (Philosophy) -- Fiction",
+          "Conduct of life -- Fiction",
+          "Didactic fiction",
+          "Great Britain -- History -- Victoria, 1837-1901 -- Fiction",
+          "London (England) -- History -- 1800-1950 -- Fiction",
+          "Paranormal fiction",
+          "Portraits -- Fiction",
+          "Supernatural -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Gothic Fiction",
+          "Movie Books"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 52851,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/174.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/174/174-0.txt"
+        }
+      },
+      {
+        "id": 98,
+        "title": "A Tale of Two Cities",
+        "authors": [
+          {
+            "name": "Dickens, Charles"
+          }
+        ],
+        "subjects": [
+          "British -- France -- Paris -- Fiction",
+          "Executions and executioners -- Fiction",
+          "France -- History -- Revolution, 1789-1799 -- Fiction",
+          "French -- England -- London -- Fiction",
+          "Historical fiction",
+          "London (England) -- History -- 18th century -- Fiction",
+          "Lookalikes -- Fiction",
+          "Paris (France) -- History -- 1789-1799 -- Fiction",
+          "War stories"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Historical Novels",
+          "Historical Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 50704,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/98.txt.utf-8"
+        }
+      },
+      {
+        "id": 64317,
+        "title": "The Great Gatsby",
+        "authors": [
+          {
+            "name": "Fitzgerald, F. Scott (Francis Scott)"
+          }
+        ],
+        "subjects": [
+          "First loves -- Fiction",
+          "Long Island (N.Y.) -- Fiction",
+          "Married women -- Fiction",
+          "Psychological fiction",
+          "Rich people -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: American Literature",
+          "Category: Classics of Literature",
+          "Category: Novels"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 50662,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/64317.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/64317/64317-0.txt"
+        }
+      },
+      {
+        "id": 16328,
+        "title": "Beowulf: An Anglo-Saxon Epic Poem",
+        "authors": [],
+        "subjects": [
+          "Dragons -- Poetry",
+          "Epic poetry, English (Old)",
+          "Monsters -- Poetry"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Mythology, Legends & Folklore",
+          "Category: Poetry",
+          "Poetry"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 50413,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/16328.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/16328/16328-0.txt"
+        }
+      },
+      {
+        "id": 65238,
+        "title": "The Secret of Chimneys",
+        "authors": [
+          {
+            "name": "Christie, Agatha"
+          }
+        ],
+        "subjects": [
+          "Battle, Superintendent (Fictitious character) -- Fiction",
+          "Detective and mystery stories",
+          "Police -- England -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Category: Romance"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 50307,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/65238.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/65238/65238-0.txt"
+        }
+      },
+      {
+        "id": 2600,
+        "title": "War and Peace",
+        "authors": [
+          {
+            "name": "Tolstoy, Leo, graf"
+          }
+        ],
+        "subjects": [
+          "Aristocracy (Social class) -- Russia -- Fiction",
+          "Historical fiction",
+          "Napoleonic Wars, 1800-1815 -- Campaigns -- Russia -- Fiction",
+          "Russia -- History -- Alexander I, 1801-1825 -- Fiction",
+          "War stories"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: Classics of Literature",
+          "Category: Historical Novels",
+          "Category: Novels",
+          "Category: Russian Literature",
+          "Historical Fiction",
+          "Movie Books",
+          "Napoleonic(Bookshelf)",
+          "Opera"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 48773,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2600.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/2600/2600-0.txt"
+        }
+      },
+      {
+        "id": 16389,
+        "title": "The Enchanted April",
+        "authors": [
+          {
+            "name": "Von Arnim, Elizabeth"
+          }
+        ],
+        "subjects": [
+          "British -- Italy -- Fiction",
+          "Domestic fiction",
+          "Female friendship -- Fiction",
+          "Italy -- Fiction",
+          "Love stories"
+        ],
+        "bookshelves": [
+          "Bestsellers, American, 1895-1923",
+          "Category: British Literature",
+          "Category: Novels"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 47374,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/16389.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/16389/16389-0.txt"
+        }
+      },
+      {
+        "id": 1952,
+        "title": "The Yellow Wallpaper",
+        "authors": [
+          {
+            "name": "Gilman, Charlotte Perkins"
+          }
+        ],
+        "subjects": [
+          "Feminist fiction",
+          "Married women -- Psychology -- Fiction",
+          "Mentally ill women -- Fiction",
+          "Psychological fiction",
+          "Sex role -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: American Literature",
+          "Category: Short Stories",
+          "Gothic Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 46806,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1952.txt.utf-8"
+        }
+      },
+      {
+        "id": 1259,
+        "title": "Twenty years after",
+        "authors": [
+          {
+            "name": "Dumas, Alexandre"
+          },
+          {
+            "name": "Maquet, Auguste"
+          }
+        ],
+        "subjects": [
+          "France -- History -- Louis XIV, 1643-1715 -- Fiction"
+        ],
+        "bookshelves": [
+          "Adventure",
+          "Category: Adventure",
+          "Category: French Literature",
+          "Category: Historical Novels",
+          "Category: Novels",
+          "Historical Fiction",
+          "Movie Books"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 46606,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1259.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1259/1259-0.txt"
+        }
+      },
+      {
+        "id": 1727,
+        "title": "The Odyssey: Rendered into English prose for the use of those who cannot read the original",
+        "authors": [
+          {
+            "name": "Homer"
+          }
+        ],
+        "subjects": [
+          "Epic poetry, Greek -- Translations into English",
+          "Homer -- Translations into English",
+          "Odysseus, King of Ithaca (Mythological character)"
+        ],
+        "bookshelves": [
+          "Category: Classics of Literature",
+          "Category: Mythology, Legends & Folklore",
+          "Category: Poetry",
+          "Classical Antiquity",
+          "Harvard Classics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 46518,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1727.txt.utf-8"
+        }
+      },
+      {
+        "id": 1232,
+        "title": "The Prince",
+        "authors": [
+          {
+            "name": "Machiavelli, Niccolò"
+          }
+        ],
+        "subjects": [
+          "Political ethics -- Early works to 1800",
+          "Political science -- Philosophy -- Early works to 1800",
+          "State, The -- Early works to 1800"
+        ],
+        "bookshelves": [
+          "Banned Books from Anne Haight's list",
+          "Category: History - Early Modern (c. 1450-1750)",
+          "Category: Philosophy & Ethics",
+          "Category: Politics",
+          "Harvard Classics",
+          "Philosophy",
+          "Politics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 45102,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1232.txt.utf-8"
+        }
+      },
+      {
+        "id": 394,
+        "title": "Cranford",
+        "authors": [
+          {
+            "name": "Gaskell, Elizabeth Cleghorn"
+          }
+        ],
+        "subjects": [
+          "England -- Fiction",
+          "Female friendship -- Fiction",
+          "Older women -- Fiction",
+          "Pastoral fiction",
+          "Sisters -- Fiction",
+          "Villages -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Novels"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 44534,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/394.txt.utf-8"
+        }
+      },
+      {
+        "id": 2160,
+        "title": "The Expedition of Humphry Clinker",
+        "authors": [
+          {
+            "name": "Smollett, T. (Tobias)"
+          }
+        ],
+        "subjects": [
+          "Epistolary fiction",
+          "Great Britain -- Fiction",
+          "Travelers -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Essays, Letters & Speeches",
+          "Category: Humour",
+          "Category: Novels",
+          "Category: Travel Writing",
+          "Historical Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 43773,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2160.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/2160/2160-0.txt"
+        }
+      },
+      {
+        "id": 8492,
+        "title": "The King in Yellow",
+        "authors": [
+          {
+            "name": "Chambers, Robert W. (Robert William)"
+          }
+        ],
+        "subjects": [
+          "Horror tales, American",
+          "Short stories, American",
+          "United States -- Social life and customs -- 19th century -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: American Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Science-Fiction & Fantasy",
+          "Category: Short Stories",
+          "Horror"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 33392,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/8492.txt.utf-8"
+        }
+      },
+      {
+        "id": 120,
+        "title": "Treasure Island",
+        "authors": [
+          {
+            "name": "Stevenson, Robert Louis"
+          }
+        ],
+        "subjects": [
+          "Pirates -- Fiction",
+          "Sea stories",
+          "Treasure Island (Imaginary place) -- Fiction",
+          "Treasure troves -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Children's Literature",
+          "Historical Fiction",
+          "Pirates, Buccaneers, Corsairs, etc."
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 31688,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/120.txt.utf-8"
+        }
+      },
+      {
+        "id": 1695,
+        "title": "The Man Who Was Thursday: A Nightmare",
+        "authors": [
+          {
+            "name": "Chesterton, G. K. (Gilbert Keith)"
+          }
+        ],
+        "subjects": [
+          "Allegories",
+          "Anarchists -- Fiction",
+          "Detective and mystery stories",
+          "Fantasy fiction",
+          "London (England) -- Fiction",
+          "Police -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Category: Philosophy & Ethics"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 26053,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1695.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1695/1695-0.txt"
+        }
+      },
+      {
+        "id": 2852,
+        "title": "The Hound of the Baskervilles",
+        "authors": [
+          {
+            "name": "Doyle, Arthur Conan"
+          }
+        ],
+        "subjects": [
+          "Blessing and cursing -- Fiction",
+          "Dartmoor (England) -- Fiction",
+          "Detective and mystery stories",
+          "Dogs -- Fiction",
+          "Holmes, Sherlock (Fictitious character) -- Fiction",
+          "Private investigators -- England -- Fiction"
+        ],
+        "bookshelves": [
+          "Bestsellers, American, 1895-1923",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Detective Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 25500,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/2852.txt.utf-8"
+        }
+      },
+      {
+        "id": 514,
+        "title": "Little Women",
+        "authors": [
+          {
+            "name": "Alcott, Louisa May"
+          }
+        ],
+        "subjects": [
+          "Autobiographical fiction",
+          "Bildungsromans",
+          "Domestic fiction",
+          "Family life -- New England -- Fiction",
+          "March family (Fictitious characters) -- Fiction",
+          "Mothers and daughters -- Fiction",
+          "New England -- Fiction",
+          "Sisters -- Fiction",
+          "Young women -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: American Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Children's Literature"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 23413,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/514.txt.utf-8"
+        }
+      },
+      {
+        "id": 583,
+        "title": "The Woman in White",
+        "authors": [
+          {
+            "name": "Collins, Wilkie"
+          }
+        ],
+        "subjects": [
+          "Art teachers -- Fiction",
+          "Country homes -- Fiction",
+          "Deception -- Fiction",
+          "England -- Fiction",
+          "Gothic fiction",
+          "Inheritance and succession -- Fiction",
+          "Love stories",
+          "Nobility -- Fiction",
+          "Psychiatric hospital patients -- Fiction",
+          "Psychological fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Mystery Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 21915,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/583.txt.utf-8"
+        }
+      },
+      {
+        "id": 155,
+        "title": "The Moonstone",
+        "authors": [
+          {
+            "name": "Collins, Wilkie"
+          }
+        ],
+        "subjects": [
+          "Country homes -- Fiction",
+          "East Indians -- England -- Fiction",
+          "England -- Fiction",
+          "Jewelry theft -- Fiction",
+          "Mystery fiction",
+          "Police -- England -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Detective Fiction",
+          "Mystery Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 21740,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/155.txt.utf-8"
+        }
+      },
+      {
+        "id": 215,
+        "title": "The call of the wild",
+        "authors": [
+          {
+            "name": "London, Jack"
+          }
+        ],
+        "subjects": [
+          "Adventure stories",
+          "Animal welfare -- Fiction",
+          "Dogs -- Fiction",
+          "Feral dogs -- Fiction",
+          "Klondike River Valley (Yukon) -- Fiction",
+          "Nature stories",
+          "Pet theft -- Fiction",
+          "Sled dogs -- Fiction"
+        ],
+        "bookshelves": [
+          "Adventure",
+          "Animals-Domestic",
+          "Banned Books List from the American Library Association",
+          "Banned Books from Anne Haight's list",
+          "Best Books Ever Listings",
+          "Category: Adventure",
+          "Category: American Literature",
+          "Category: Classics of Literature",
+          "Category: Novels",
+          "Movie Books"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 19679,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/215.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/215/215-0.txt"
+        }
+      },
+      {
+        "id": 558,
+        "title": "The Thirty-Nine Steps",
+        "authors": [
+          {
+            "name": "Buchan, John"
+          }
+        ],
+        "subjects": [
+          "Hannay, Richard (Fictitious character) -- Fiction",
+          "Intelligence service -- Great Britain -- Fiction",
+          "Spy stories",
+          "World War, 1914-1918 -- Fiction"
+        ],
+        "bookshelves": [
+          "Adventure",
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Novels",
+          "Movie Books",
+          "Mystery Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 19646,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/558.txt.utf-8"
+        }
+      },
+      {
+        "id": 1514,
+        "title": "A Midsummer Night's Dream",
+        "authors": [
+          {
+            "name": "Shakespeare, William"
+          }
+        ],
+        "subjects": [
+          "Athens (Greece) -- Drama",
+          "Comedy plays",
+          "Courtship -- Drama",
+          "Fairy plays"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Humour",
+          "Category: Plays/Films/Dramas",
+          "Category: Romance",
+          "Category: Science-Fiction & Fantasy"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 16224,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1514.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1514/1514-0.txt"
+        }
+      },
+      {
+        "id": 17396,
+        "title": "The Secret Garden",
+        "authors": [
+          {
+            "name": "Burnett, Frances Hodgson"
+          }
+        ],
+        "subjects": [
+          "Gardens -- Juvenile fiction",
+          "Orphans -- Juvenile fiction",
+          "People with disabilities -- Juvenile fiction",
+          "Yorkshire (England) -- Juvenile fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Children & Young Adult Reading",
+          "Category: Novels",
+          "Children's Literature"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 11019,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/17396.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/17396/17396-8.txt"
+        }
+      },
+      {
+        "id": 1874,
+        "title": "The Railway Children",
+        "authors": [
+          {
+            "name": "Nesbit, E. (Edith)"
+          }
+        ],
+        "subjects": [
+          "Country life -- England -- Fiction",
+          "England -- Fiction",
+          "Family life -- Fiction",
+          "Railroads -- Fiction",
+          "Siblings -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Children & Young Adult Reading",
+          "Children's Fiction",
+          "Children's Literature"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 10769,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1874.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1874/1874.txt"
+        }
+      },
+      {
+        "id": 1524,
+        "title": "Hamlet",
+        "authors": [
+          {
+            "name": "Shakespeare, William"
+          }
+        ],
+        "subjects": [
+          "Denmark -- Drama",
+          "Fathers -- Death -- Drama",
+          "Hamlet (Legendary character) -- Drama",
+          "Kings and rulers -- Succession -- Drama",
+          "Murder victims' families -- Drama",
+          "Princes -- Drama",
+          "Revenge -- Drama",
+          "Tragedies (Drama)"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Classics of Literature",
+          "Category: Plays/Films/Dramas",
+          "Plays"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 10535,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1524.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1524/1524-0.txt"
+        }
+      },
+      {
+        "id": 1268,
+        "title": "The Mysterious Island",
+        "authors": [
+          {
+            "name": "Verne, Jules"
+          }
+        ],
+        "subjects": [
+          "Adventure stories",
+          "Castaways -- Fiction",
+          "Islands of the Pacific -- Fiction",
+          "Science fiction"
+        ],
+        "bookshelves": [
+          "Category: Adventure",
+          "Category: French Literature",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Science Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 9034,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/1268.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/1268/1268-0.txt"
+        }
+      },
+      {
+        "id": 139,
+        "title": "The Lost World",
+        "authors": [
+          {
+            "name": "Doyle, Arthur Conan"
+          }
+        ],
+        "subjects": [
+          "Challenger, Professor (Fictitious character) -- Fiction",
+          "Dinosaurs -- Fiction",
+          "Fantasy fiction",
+          "Prehistoric peoples -- Fiction",
+          "South America -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: Adventure",
+          "Category: British Literature",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Science Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 9009,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/139.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/139/139-0.txt"
+        }
+      },
+      {
+        "id": 308,
+        "title": "Three men in a boat (to say nothing of the dog)",
+        "authors": [
+          {
+            "name": "Jerome, Jerome K. (Jerome Klapka)"
+          }
+        ],
+        "subjects": [
+          "Boats and boating -- England -- Thames River -- Fiction",
+          "Dogs -- Fiction",
+          "Humorous stories, English",
+          "Male friendship -- Fiction",
+          "Thames River (England) -- Fiction",
+          "Young men -- Travel -- England -- Thames River -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Humour",
+          "Category: Novels",
+          "Humor"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 8077,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/308.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/308/308-0.txt"
+        }
+      },
+      {
+        "id": 159,
+        "title": "The island of Doctor Moreau",
+        "authors": [
+          {
+            "name": "Wells, H. G. (Herbert George)"
+          }
+        ],
+        "subjects": [
+          "Animal experimentation -- Fiction",
+          "Islands -- Fiction",
+          "Science -- Ethics -- Fiction",
+          "Science fiction",
+          "Shipwreck survival -- Fiction"
+        ],
+        "bookshelves": [
+          "Best Books Ever Listings",
+          "Category: British Literature",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Movie Books",
+          "Science Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 7134,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/159.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/159/159-0.txt"
+        }
+      },
+      {
+        "id": 778,
+        "title": "Five Children and It",
+        "authors": [
+          {
+            "name": "Nesbit, E. (Edith)"
+          }
+        ],
+        "subjects": [
+          "Fairies -- Fiction",
+          "Great Britain -- History -- Edward VII, 1901-1910 -- Fiction",
+          "Siblings -- Fiction",
+          "Wishes -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Children & Young Adult Reading",
+          "Category: Novels",
+          "Category: Science-Fiction & Fantasy",
+          "Children's Literature"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 1403,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/778.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/778/778.txt"
+        }
+      },
+      {
+        "id": 706,
+        "title": "The Amateur Cracksman",
+        "authors": [
+          {
+            "name": "Hornung, E. W. (Ernest William)"
+          }
+        ],
+        "subjects": [
+          "Criminals -- Fiction",
+          "Detective and mystery stories, English",
+          "England -- Fiction",
+          "Raffles (Fictitious character) -- Fiction"
+        ],
+        "bookshelves": [
+          "Category: British Literature",
+          "Category: Crime, Thrillers and Mystery",
+          "Category: Short Stories",
+          "Crime Fiction"
+        ],
+        "languages": [
+          "en"
+        ],
+        "copyright": false,
+        "download_count": 1029,
+        "formats": {
+          "text/plain; charset=utf-8": "https://www.gutenberg.org/ebooks/706.txt.utf-8",
+          "text/plain; charset=us-ascii": "https://www.gutenberg.org/files/706/706-0.txt"
+        }
+      }
+    ],
+    "fr": [],
+    "zh": []
+  }
+}

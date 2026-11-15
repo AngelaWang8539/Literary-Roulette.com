@@ -1,0 +1,405 @@
+[
+  {
+    "id": "fr-b001",
+    "text_file": "fr-b001.txt",
+    "title": "Notre-Dame de Paris",
+    "author": "Victor Hugo",
+    "genres": [
+      "Roman historique",
+      "Romantisme"
+    ],
+    "description": "Quasimodo, Esmeralda et la cathédrale de Paris se trouvent au cœur d'un roman sur le destin, l'amour et la société.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 19657,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/19657",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #19657",
+    "min_words": 70000,
+    "start_hint": "Il y a aujourd'hui trois cent quarante-huit ans"
+  },
+  {
+    "id": "fr-b002",
+    "text_file": "fr-b002.txt",
+    "title": "Les Trois Mousquetaires",
+    "author": "Alexandre Dumas (avec Auguste Maquet)",
+    "genres": [
+      "Aventure",
+      "Roman historique"
+    ],
+    "description": "D'Artagnan rejoint Athos, Porthos et Aramis dans une aventure de loyauté, de duels et d'intrigues de cour.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 13951,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/13951",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #13951",
+    "min_words": 90000,
+    "start_hint": "Le premier lundi du mois d’avril 1625"
+  },
+  {
+    "id": "fr-b003",
+    "text_file": "fr-b003.txt",
+    "title": "Madame Bovary",
+    "author": "Gustave Flaubert",
+    "genres": [
+      "Roman réaliste",
+      "Roman psychologique"
+    ],
+    "description": "Emma Bovary cherche à échapper à l’ennui provincial et aux contraintes de sa vie conjugale.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 14155,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/14155",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #14155",
+    "min_words": 45000,
+    "start_hint": "Nous étions à l’Étude"
+  },
+  {
+    "id": "fr-b004",
+    "text_file": "fr-b004.txt",
+    "title": "Le Horla",
+    "author": "Guy de Maupassant",
+    "genres": [
+      "Fantastique",
+      "Horreur psychologique"
+    ],
+    "description": "Un narrateur consigne dans son journal une présence invisible qui semble prendre le contrôle de son esprit.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 10775,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/10775",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #10775",
+    "min_words": 8000,
+    "start_hint": "_8 mai._--Quelle journée admirable!"
+  },
+  {
+    "id": "fr-b005",
+    "text_file": "fr-b005.txt",
+    "title": "Boule de Suif",
+    "author": "Guy de Maupassant",
+    "genres": [
+      "Nouvelle",
+      "Satire sociale"
+    ],
+    "description": "Pendant la guerre de 1870, les passagers d'une diligence sont confrontés à l'hypocrisie et aux intérêts de classe.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 10746,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/10746",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #10746",
+    "min_words": 5000,
+    "start_hint": "Pendant plusieurs jours de suite"
+  },
+  {
+    "id": "fr-b006",
+    "text_file": "fr-b006.txt",
+    "title": "Vingt mille lieues sous les mers",
+    "author": "Jules Verne",
+    "genres": [
+      "Science-fiction",
+      "Aventure"
+    ],
+    "description": "Le professeur Aronnax découvre les merveilles et les dangers du monde sous-marin à bord du Nautilus.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 5097,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/5097",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #5097",
+    "min_words": 50000,
+    "start_hint": "L'année 1866 fut marquée"
+  },
+  {
+    "id": "fr-b007",
+    "text_file": "fr-b007.txt",
+    "title": "Le Tour du monde en quatre-vingts jours",
+    "author": "Jules Verne",
+    "genres": [
+      "Aventure",
+      "Voyage"
+    ],
+    "description": "Phileas Fogg entreprend de faire le tour du monde en quatre-vingts jours, accompagné de Passepartout.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 3456,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/3456",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #3456",
+    "min_words": 30000,
+    "start_hint": "En l'année 1872"
+  },
+  {
+    "id": "fr-b008",
+    "text_file": "fr-b008.txt",
+    "title": "Candide, ou l'Optimisme",
+    "author": "Voltaire",
+    "genres": [
+      "Conte philosophique",
+      "Satire"
+    ],
+    "description": "Candide traverse guerres, catastrophes et aventures qui mettent à l'épreuve son optimisme appris.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 4650,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/4650",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #4650",
+    "min_words": 12000,
+    "start_hint": "Il y avait en Vestphalie"
+  },
+  {
+    "id": "fr-b009",
+    "text_file": "fr-b009.txt",
+    "title": "Le Rouge et le Noir",
+    "author": "Stendhal",
+    "genres": [
+      "Roman psychologique",
+      "Roman social"
+    ],
+    "description": "Julien Sorel cherche à s'élever dans une société dominée par les ambitions, les apparences et les hiérarchies.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 798,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/798",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #798",
+    "min_words": 50000,
+    "start_hint": "La petite ville de Verrières"
+  },
+  {
+    "id": "fr-b010",
+    "text_file": "fr-b010.txt",
+    "title": "Germinal",
+    "author": "Émile Zola",
+    "genres": [
+      "Roman social",
+      "Roman naturaliste"
+    ],
+    "description": "Étienne Lantier découvre la misère des mineurs et participe à une lutte collective contre leurs conditions de travail.",
+    "language": "fr",
+    "familiarity": "classic",
+    "gutenberg_id": 5711,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/5711",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #5711",
+    "min_words": 50000,
+    "start_hint": "Dans la plaine rase, sous la nuit sans étoiles"
+  },
+  {
+    "id": "fr-b011",
+    "text_file": "fr-b011.txt",
+    "title": "Arsène Lupin, gentleman-cambrioleur",
+    "author": "Maurice Leblanc",
+    "genres": [
+      "Mystère",
+      "Aventure",
+      "Nouvelles"
+    ],
+    "description": "Le gentleman-cambrioleur Arsène Lupin mène des vols ingénieux et des jeux d'identité pleins d'esprit.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 32854,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/32854",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #32854",
+    "min_words": 12000,
+    "start_hint": "L'étrange voyage!"
+  },
+  {
+    "id": "fr-b012",
+    "text_file": "fr-b012.txt",
+    "title": "Le Fantôme de l'Opéra",
+    "author": "Gaston Leroux",
+    "genres": [
+      "Mystère",
+      "Gothique",
+      "Suspense"
+    ],
+    "description": "Dans les coulisses de l'Opéra de Paris, une présence mystérieuse fascine et terrifie les artistes.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 62215,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/62215",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #62215",
+    "min_words": 30000,
+    "start_hint": "Ce soir-là, qui était celui où MM. Debienne et Poligny"
+  },
+  {
+    "id": "fr-b013",
+    "text_file": "fr-b013.txt",
+    "title": "Lettres de mon moulin",
+    "author": "Alphonse Daudet",
+    "genres": [
+      "Nouvelles",
+      "Récit"
+    ],
+    "description": "Des récits provençaux mêlent humour, tendresse, paysages et personnages hauts en couleur.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 11770,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/11770",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #11770",
+    "min_words": 9000,
+    "start_hint": "Ce sont les lapins qui ont été étonnés"
+  },
+  {
+    "id": "fr-b014",
+    "text_file": "fr-b014.txt",
+    "title": "Le Capitaine Fracasse",
+    "author": "Théophile Gautier",
+    "genres": [
+      "Aventure",
+      "Roman historique"
+    ],
+    "description": "Un gentilhomme ruiné rejoint une troupe de comédiens ambulants et découvre l'aventure et le théâtre.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 60746,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/60746",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #60746",
+    "min_words": 30000,
+    "start_hint": "Sur le revers d’une de ces collines décharnées qui bossuent les Landes"
+  },
+  {
+    "id": "fr-b015",
+    "text_file": "fr-b015.txt",
+    "title": "Eugénie Grandet",
+    "author": "Honoré de Balzac",
+    "genres": [
+      "Roman réaliste",
+      "Drame familial"
+    ],
+    "description": "Dans une maison provinciale dominée par l'avarice, Eugénie découvre l'amour et le prix de l'indépendance.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 11049,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/11049",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #11049",
+    "min_words": 20000,
+    "start_hint": "Il se trouve dans certaines provinces des maisons"
+  },
+  {
+    "id": "fr-b016",
+    "text_file": "fr-b016.txt",
+    "title": "Contes de la Bécasse",
+    "author": "Guy de Maupassant",
+    "genres": [
+      "Nouvelles",
+      "Réalisme",
+      "Humour"
+    ],
+    "description": "Une série de nouvelles observe avec ironie les habitudes, les désirs et les travers de la société.",
+    "language": "fr",
+    "familiarity": "discovery",
+    "gutenberg_id": 11714,
+    "source_provider": "Project Gutenberg",
+    "source_url": "https://www.gutenberg.org/ebooks/11714",
+    "publication": {
+      "year": ""
+    },
+    "rights_status": "public_domain_candidate",
+    "territory": "France; United States; verify other markets",
+    "source_license_note": "Project Gutenberg identifies its US-hosted text as public domain in the USA. This is a candidate for reuse, not a substitute for checking the exact edition and copyright status in every target territory.",
+    "source_credit": "Texte français : Project Gutenberg, eBook #11714",
+    "min_words": 8000,
+    "start_hint": "Le vieux baron des Ravots"
+  }
+]
