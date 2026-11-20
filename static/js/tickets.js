@@ -8,7 +8,7 @@
 //   each request; the server keeps no per-visitor state.
 const sleepFor = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxSeenBooks = 120, maxSeenPassages = 200,
+export function createTicketPouch({ api, language, batch = 3, lowWater = 2, maxSeenBooks = 120, maxSeenPassages = 200,
                                     pollMs = 700, sleep = sleepFor, stallMs = 25000, maxWaitMs = 70000 }) {
   let queue = [], seenBooks = [], current = null, refilling = null, companion = null, bg = null;
   const pending = new Map();                       // handle -> {startedAt, drawNumber, total, percent, stage, message}
@@ -81,6 +81,8 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
       const began = Date.now();
       for (let guard = 0; guard < 600; guard++) {
         if (queue.length) { return { ok: true, ticket: queue.shift() }; }
+        if (refilling) {await refilling;
+        if (queue.length) continue;}
         if (Date.now() - began > maxWaitMs) return { ok: false, code: "slow", message: "Project Gutenberg is very slow right now. Please try another spin in a moment." };
         if (!pending.size) {
           const res = await refill();
@@ -104,7 +106,7 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
     /** Call when a ticket has actually been displayed. */
     shown(ticket) {
       current = ticket; rememberBook(ticket.book_token);
-      if (queue.length + pending.size <= lowWater) refill().catch(() => {});     // quiet top-up
+      if (queue.length <= lowWater) refill().catch(() => {});     // quiet top-up
       const set = passageSet(ticket.book_token); set.add(ticket.token);
       if (set.size > maxSeenPassages) set.delete(set.values().next().value);
       companion = { bookToken: ticket.book_token, promise: null };

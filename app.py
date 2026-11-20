@@ -244,14 +244,27 @@ def create_app(test_config=None):
                     pending.append({"handle": cat.book_token(record["id"]), "draw_number": record["draw_number"], "total": total})
                 else:
                     shed += 1
-            if shed:                              # overload protection: still random, from what is already prepared
+            # Always keep the reader's ready-to-serve pouch stocked.
+            if len(out) < count:
                 taken = {t["book_token"] for t in out} | {p["handle"] for p in pending}
-                lake = rt.lake(language)
-                picked, _ = draw.pick_books(lake, cat.book_token, shed, seen | taken, rng(), avoid)
-                out += [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
-                if not out and not pending:       # nothing prepared yet and the queue is long: the bundled shelf, said out loud
-                    picked, _ = draw.pick_books(rt.starters(language), cat.book_token, 1, seen, rng(), avoid)
-                    out = [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
+                used_tokens = seen | taken
+
+                ready_pool = tuple(dict.fromkeys(
+                    (*rt.lake(language), *rt.starters(language))
+                ))
+
+                fresh_ready = [
+                    bid for bid in ready_pool
+                    if bid not in avoid and cat.book_token(bid) not in used_tokens
+                ]
+
+                backups, _ = draw.pick_books(
+                    fresh_ready, cat.book_token, count - len(out), set(), rng()
+                )
+
+                out.extend(
+                    t for t in (random_ticket(language, cat, bid) for bid in backups) if t
+                )
         if not out and not pending:
             return fail("only_one_book", "Only one usable book is available in this collection.", 200)
         return jsonify(ok=True, mode=mode, language=language, tickets=out, pending=pending, shed=shed,
