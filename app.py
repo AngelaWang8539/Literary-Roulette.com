@@ -21,7 +21,7 @@ from runtime import LANGUAGES, Runtime
 
 SITE = {"creator_name": "[Your Name]", "contact_email": "[rights contact email to be added]"}
 EVENT_NAMES = ("passage_displayed", "another_passage_requested", "another_book_requested", "book_hidden",
-               "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
+               "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure", "share_created")
 EVENT_INTEREST = {"passage_displayed": "displayed", "another_passage_requested": "another", "book_saved": "saved"}
 MAX_SEEN_TOKENS = 300
 STAGE_TEXT = {"queued": "Waiting in the queue", "fetching": "Fetching this edition", "cleaning": "Cleaning the text",
@@ -37,7 +37,7 @@ def create_app(test_config=None):
     app = Flask(__name__)
     app.config.update(
         BASE_DIR=base, DATA_DIR=base / "data", INSTANCE_DIR=base / "instance", SHELF_DIR=None, DB_PATH=None,
-        DEFAULT_LANGUAGE="en", RNG=None, SITE=SITE,
+        DEFAULT_LANGUAGE="en", RNG=None, SITE=SITE, 
         # Rights stay a separate gate from technical checks. While books.json still says
         # "pending_verification", this lets you test locally. Set LR_ALLOW_PENDING_RIGHTS=0 to go public.
         ALLOW_PENDING_RIGHTS=_env_flag("LR_ALLOW_PENDING_RIGHTS", True),
@@ -85,7 +85,7 @@ def create_app(test_config=None):
     def pick_up_changes_from_other_processes():
         if not request.path.startswith("/api/"):
             return
-        if rt.shelf.refresh_if_changed():
+        if rt.shelf.refresh_if_changed():          # another process published or retired a book
             rt.sync_external()
         now = time.monotonic()
         if now >= _next_meta_check[0] and _meta_lock.acquire(blocking=False):
@@ -259,21 +259,28 @@ def create_app(test_config=None):
 
     @app.post("/api/draw/poll")
     def draw_poll():
-        """Progress of picks that are still being prepared. Real stages, real percentages."""
+        """Progress of picks that are still being prepared. Real stages, real numbers, from the shared job store, so
+        it does not matter which web process answers."""
         body = body_json()
         language = language_from(body)
         cat = rt.catalogues[language]
         results = []
         for handle in clean_tokens(body.get("handles"), 8):
             book = cat.book_by_token(handle)
+            view = None
+            if not (book and rt.shelf.has(language, book["id"])):
+                view = rt.worker.job_view(language, handle)
+                if view and view["state"] == "done":          # published by another process a moment ago: pick it up
+                    rt.sync_external()
+                    book = cat.book_by_token(handle)
             if book and rt.shelf.has(language, book["id"]):
                 ticket = random_ticket(language, cat, book["id"])
                 results.append({"handle": handle, "state": "ready" if ticket else "failed", "percent": 100, "ticket": ticket})
-                continue
-            job = rt.worker.find_job(language, handle)
-            if job:
-                results.append({"handle": handle, "state": "working", "stage": job.stage, "percent": job.percent,
-                                "message": STAGE_TEXT.get(job.stage, "Working")})
+            elif view and view["state"] in ("queued", "running"):
+                message = STAGE_TEXT.get(view["stage"], "Working") + (f" \u00b7 {view['detail']}" if view["detail"] else "")
+                results.append({"handle": handle, "state": "working", "stage": view["stage"], "percent": view["percent"],
+                                "message": message, "ahead": view["ahead"] if view["stage"] == "queued" else 0,
+                                "stalled": round(time.time() - view["moved"], 1)})
             else:
                 results.append({"handle": handle, "state": "failed",
                                 "message": "That edition could not be fetched, so the librarian is drawing another."})
@@ -313,7 +320,11 @@ def create_app(test_config=None):
         index = payload["index"] if payload and payload["book_token"] == body.get("book_token") else None
         analytics.log_event(db_path, "book_revealed", book["id"], f"{book['id']}:{index}" if index is not None else None)
         rt.shelf.note_interest(language, book["id"], "reveal")
-        return jsonify(ok=True, language=language, book=cat.book_payload(book, index))
+        payload_ = cat.book_payload(book, index)
+        if str(book.get("gutenberg_id") or "").isdigit():       # popularity is looked up fresh at reveal time, never stored stale
+            deep = rt.universe.popularity(language, int(book["gutenberg_id"])) if rt.universe.available else None
+            payload_["popularity"] = rt.popularity.payload(language, book["gutenberg_id"], deep=deep)
+        return jsonify(ok=True, language=language, book=payload_)
 
     @app.post("/api/event")
     def event():
@@ -350,6 +361,9 @@ def create_app(test_config=None):
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    import hardening
+    hardening.apply(app)
 
     return app
 

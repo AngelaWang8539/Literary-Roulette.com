@@ -48,7 +48,12 @@ function startTicker() {
   timer = setInterval(() => { tickScene(scene, width); paint(); }, TICK_MS);
 }
 
-function setMeter(percent) {
+function setMeter(percent, indeterminate = false) {
+  if (indeterminate) {                                    // working, but the size is not known yet: a moving bar, no invented number
+    els.meter.hidden = false; els.bar.classList.add("indet"); els.fill.style.width = ""; els.pct.textContent = "";
+    els.bar.removeAttribute("aria-valuenow"); return;
+  }
+  els.bar.classList.remove("indet");
   if (typeof percent !== "number") { els.meter.hidden = true; return; }
   const p = Math.max(0, Math.min(100, Math.round(percent)));
   els.meter.hidden = false; els.fill.style.width = p + "%"; els.pct.textContent = p + "%";
@@ -67,7 +72,7 @@ function show(op) {
     startTicker();
   }
   els.caption.textContent = translate(op.message || "");
-  setMeter(op.percent);
+  setMeter(op.percent, op.indeterminate);
   if (reduced()) paint();
 }
 
@@ -100,6 +105,7 @@ export function begin(mode = "load", message = "") {
       if (text != null) op.message = text;
       if (opts.mode) op.mode = opts.mode;
       if ("percent" in opts) op.percent = opts.percent;
+      if ("indeterminate" in opts) op.indeterminate = !!opts.indeterminate;
       if (op.visible && !op.ended) show(op);
     },
     done(text) {

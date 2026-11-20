@@ -70,7 +70,10 @@
     <div class="row">
       <button id="btn-save" class="btn quiet" type="button" aria-pressed="false">Save this book</button>
       <button id="btn-hide" class="btn quiet" type="button">Hide book details</button>
+      <button id="btn-share" class="btn quiet" type="button" hidden>Share this discovery</button>
+      <button id="btn-copy-link" class="btn quiet" type="button" hidden>Copy link</button>
     </div>
+    <p id="share-note" class="meta" hidden></p>
     <div id="awareness" class="awareness" role="group" aria-labelledby="aw-q" hidden>
       <p id="aw-q">Had you heard of this book before today?</p>
       <button class="btn quiet" type="button" data-answer="known">Yes</button>
@@ -128,4 +131,4 @@
   </div>
 </dialog>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/mobile-menu.js') }}" defer></script><script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/boot-guard.js') }}"></script><script src="{{ url_for('static', filename='js/mobile-menu.js') }}" defer></script><script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>{% endblock %}

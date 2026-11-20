@@ -1,3 +1,9 @@
+## 0.10 - one badge, one share card
+
+- Badge: every tier has its own tone and mark, several wordings (a book always keeps its line), a real rank and download fact for the quiet tiers, and a "New to you" chip from this device's recent history. Books outside Gutenberg's monthly top 100 now use the catalogue's own download percentile instead of one repeated line.
+- Share card: the new wide (computer) and tall (phone) designs replace the old card inside `static/js/sharecard.js`; fonts load only when a card is made. Demo books are labelled "Sample card". Still drawn on the visitor's device.
+- Tests updated (share card) and added (badge lines).
+
 # Changelog
 
 ## 0.8.0 - one catalogue source, honest first run

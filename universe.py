@@ -171,6 +171,17 @@ def build_from_records(records, db_path, *, blocked=(), seed=None, log=print, pr
     return counts
 
 
+def touch(db_path, generated_at=None):
+    """The catalogue was checked and is unchanged: record 'fresh as of now' without rebuilding anything."""
+    import sqlite3 as _sqlite
+    conn = _sqlite.connect(db_path, timeout=10)
+    try:
+        conn.execute("UPDATE info SET value=? WHERE key='generated_at'", (generated_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class Universe:
     """Read-only view of universe.sqlite. Cheap to create; safe across threads; reloads when the file changes."""
 

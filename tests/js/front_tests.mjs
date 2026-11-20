@@ -65,6 +65,26 @@ await test("first run: while the catalogue opens the wait is reported with real 
   assert.ok(res.ok); assert.deepEqual(opening.map((p) => p.percent), [20, 40]); pouch.stop();
 });
 
+await test("a book that stops moving is replaced by a new draw instead of being waited on forever", async () => {
+  let draws = 0; const notes = [];
+  const api = async (path, body) => {
+    if (path === "/api/draw") { draws++; return draws === 1
+      ? { ok: true, mode: "ocean", total: 800, tickets: [], pending: [{ handle: "h1", draw_number: 1, total: 800 }] }
+      : { ok: true, mode: "ocean", total: 800, pending: [], tickets: [{ ticket: "t", token: "p", book_token: "b2", text: "fresh" }] }; }
+    if (path === "/api/draw/poll") return { ok: true, results: body.handles.map((h) => ({ handle: h, state: "working", stage: "fetching", percent: 12, message: "Fetching this edition" })) };
+  };
+  const pouch = createTicketPouch({ api, language: "en", pollMs: 2, sleep: () => sleep(2), stallMs: 40 });
+  const res = await pouch.next({ onNotice: (t) => notes.push(t) });
+  assert.ok(res.ok); assert.equal(res.ticket.text, "fresh"); assert.equal(draws, 2); assert.equal(notes.length, 1); pouch.stop();
+});
+await test("an unknown-size download shows as 'moving', and an overall cap ends a hopeless wait with a friendly message", async () => {
+  const api = async (path, body) => path === "/api/draw"
+    ? { ok: true, mode: "ocean", total: 800, tickets: [], pending: [{ handle: "h1", draw_number: 1, total: 800 }] }
+    : { ok: true, results: body.handles.map((h) => ({ handle: h, state: "working", stage: "fetching", percent: null, message: "Fetching this edition \u00b7 " + Math.random() })) };
+  const pouch = createTicketPouch({ api, language: "en", pollMs: 2, sleep: () => sleep(2), stallMs: 100000, maxWaitMs: 60 });
+  const seen = []; const res = await pouch.next({ onProgress: (p) => seen.push(p) });
+  assert.ok(seen.length > 2 && seen.slice(1).every((p) => p.percent === null)); assert.equal(res.ok, false); assert.equal(res.code, "slow"); pouch.stop();
+});
 await test("refill avoids the book on screen and sends the visitor's own seen list", async () => {
   const { api, calls } = fakeServer(); const pouch = createTicketPouch({ api, language: "fr", batch: 2 });
   const a = await pouch.next(); pouch.shown(a.ticket); const b = await pouch.next(); pouch.shown(b.ticket); await sleep(5);
@@ -104,8 +124,11 @@ await test("terminal scenes: INDEXED! stamp on success, dropped book and speech 
 // ---------------- librarian overlay: the one-second rule ----------------
 function makeEl() {
   const kids = {};
+  const cls = new Set();
   const el = { hidden: true, textContent: "", innerHTML: "", clientWidth: 600, style: {}, attrs: {},
-    setAttribute(k, v) { this.attrs[k] = v; }, querySelector(sel) { return kids[sel] || (kids[sel] = makeEl()); } };
+    classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) },
+    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
+    querySelector(sel) { return kids[sel] || (kids[sel] = makeEl()); } };
   return el;
 }
 const root = makeEl();
@@ -131,6 +154,13 @@ await test("a wait that is already known to be real (a cold book) shows the libr
   assert.equal(root.hidden, false); assert.equal(caption(), "Opening the catalogue");
   op.update("Downloading catalogue from Project Gutenberg\u2026 42%", { percent: 30 }); assert.equal(root.querySelector(".pct").textContent, "30%");
   op.done(); await sleep(1700); assert.equal(root.hidden, true);
+});
+await test("an unknown-size download shows a moving bar and no invented percentage", async () => {
+  const op = Librarian.begin("load", "x"); op.show();
+  op.update("Fetching this edition \u00b7 1.2 MB", { indeterminate: true, percent: undefined });
+  assert.ok(root.querySelector(".bar").classList.contains("indet")); assert.equal(root.querySelector(".pct").textContent, "");
+  op.update("Cleaning the text", { indeterminate: false, percent: 70 }); assert.ok(!root.querySelector(".bar").classList.contains("indet"));
+  assert.equal(root.querySelector(".pct").textContent, "70%"); op.done(); await sleep(1700);
 });
 await test("a fast failure shows no drawing; a slow failure shows the friendly dropped-book scene", async () => {
   Librarian.begin("load", "x").fail("nope"); assert.equal(root.hidden, true);

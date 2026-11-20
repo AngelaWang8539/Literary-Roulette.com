@@ -1,5 +1,6 @@
 """Run all tests:  python -m unittest discover -s tests -t . -v"""
 import hashlib
+import os
 import json
 import random
 import shutil
@@ -87,7 +88,9 @@ class ShelfTests(unittest.TestCase):
         s = ReadyShelf(self.tmp.name)
         s.publish("en", "x", ["abc"], edition_key="e", content_hash="a" * 64, segment_version="v1")
         data = next((Path(self.tmp.name) / "en").glob("*.txt")); data.write_bytes(b"ab")   # truncated
-        self.assertEqual(ReadyShelf(self.tmp.name).ids("en"), ())
+        other = ReadyShelf(self.tmp.name)
+        self.assertIsNone(other.read_passage("en", "x", 0))                              # never half a book...
+        self.assertEqual(other.ids("en"), ()); self.assertEqual(s.ids("en"), ())          # ...and it is forgotten so it can be rebuilt
 
     def test_other_process_changes_are_picked_up(self):
         a, b = ReadyShelf(self.tmp.name, scan_interval=0), ReadyShelf(self.tmp.name, scan_interval=0)
@@ -98,7 +101,7 @@ class ShelfTests(unittest.TestCase):
         s = ReadyShelf(self.tmp.name)
         for i in range(4):
             s.publish("en", f"c{i}", ["p"], edition_key="e", content_hash=str(i) * 64, segment_version="v", external=True, book={"id": f"c{i}"})
-            s._index["en"][f"c{i}"]["prepared_at"] = 1000 + i
+            s._set_prepared_at("en", f"c{i}", 1000 + i)
         s.publish("en", "local", ["p"], edition_key="e", content_hash="9" * 64, segment_version="v")
         s.note_interest("en", "c0", "saved")                       # interest must NOT keep the oldest alive
         self.assertEqual(sorted(s.evict_cold("en", 2)), ["c0", "c1"])
@@ -547,7 +550,7 @@ class OceanTests(OceanBase):
         for i in range(6):
             self.rt.shelf.publish("en", f"pg-en-{900 + i}", ["p"], edition_key="e", content_hash=str(i) * 64, segment_version="v",
                                   external=True, book={"id": f"pg-en-{900 + i}", "title": "t", "text_url": "x", "rights_status": "approved"})
-            self.rt.shelf._index["en"][f"pg-en-{900 + i}"]["prepared_at"] = 1000 + i
+            self.rt.shelf._set_prepared_at("en", f"pg-en-{900 + i}", 1000 + i)
         self.rt.shelf.note_interest("en", "pg-en-900", "saved")                  # interest must not keep the oldest
         w.maintenance()
         self.assertEqual(sorted(w.lake_ids("en")), ["pg-en-903", "pg-en-904", "pg-en-905"])
@@ -573,6 +576,15 @@ class OceanTests(OceanBase):
 
     def test_history_is_capped_at_75(self):
         self.assertIn("HISTORY_LIMIT = 75", Path("static/js/storage.js").read_text(encoding="utf-8"))
+
+    def test_poll_shows_bytes_when_the_size_is_unknown_and_the_queue_position_while_waiting(self):
+        res = self.post("/api/draw", count=3); handles = [p["handle"] for p in res["pending"]]
+        first = self.post("/api/draw/poll", handles=handles)["results"]
+        self.assertEqual([r["ahead"] for r in first], [0, 1, 2])                          # three picks queued one behind the other
+        job = self.rt.worker.find_job("en", handles[0])
+        self.rt.worker._set_stage(job, "fetching", job.percent, "1.2 MB", True)
+        r = self.post("/api/draw/poll", handles=handles[:1])["results"][0]
+        self.assertIsNone(r["percent"]); self.assertIn("1.2 MB", r["message"]); self.assertLess(r["stalled"], 5)
 
     def test_stage_progress_never_goes_backwards(self):
         job = prep.Job("k", prep.COLD, "en", {"id": "x"}, 0); w = self.rt.worker
@@ -607,6 +619,207 @@ class OfflineTests(OceanBase):
         res = self.post("/api/draw", count=3); self.assertEqual(res["mode"], "starter"); self.assertEqual(len(res["tickets"]), 3)
 
 
+class HardeningTests(OceanBase):
+    """Several web processes sharing one instance folder (what Gunicorn does), plus the safety nets."""
+
+    def second_process(self):
+        other = create_app(self.config)               # a second Runtime on the same folder = a second Gunicorn worker
+        other.runtime.worker.rng = random.Random(9)
+        return other
+
+    def test_a_poll_answered_by_another_process_sees_real_progress_and_then_the_book(self):
+        other = self.second_process(); client_b = other.test_client()
+        res = self.post("/api/draw", count=2); handles = [p["handle"] for p in res["pending"]]       # process A takes the draw
+        seen = client_b.post("/api/draw/poll", json={"handles": handles}).get_json()["results"]      # process B answers the poll
+        self.assertEqual([r["state"] for r in seen], ["working", "working"])
+        self.assertEqual([r["ahead"] for r in seen], [0, 1])
+        self.rt.worker.run_pending()                                                                   # A prepares the books
+        done = client_b.post("/api/draw/poll", json={"handles": handles}).get_json()["results"]
+        self.assertEqual([r["state"] for r in done], ["ready", "ready"]); self.assertTrue(all(r["ticket"]["text"] for r in done))
+
+    def test_two_processes_wanting_the_same_cold_book_download_it_once(self):
+        other = self.second_process()
+        record = self.rt.universe.random_candidates("en", 1, random.Random(4))[0]
+        self.rt.worker.enqueue(prep.COLD, "en", record, 0); other.runtime.worker.enqueue(prep.COLD, "en", record, 0)
+        self.rt.worker.run_pending(); other.runtime.worker.run_pending()
+        self.assertEqual(self.fetched.count(record["gutenberg_id"]), 1)
+        self.assertTrue(other.runtime.shelf.has("en", record["id"]))
+
+    def test_the_library_index_needs_no_file_scan_to_start(self):
+        for i in range(50):
+            self.rt.shelf.publish("en", f"pg-en-{700 + i}", ["p"], edition_key="e", content_hash=f"{i:064d}", segment_version="v",
+                                  external=True, book={"id": f"pg-en-{700 + i}", "title": "t", "text_url": "x", "rights_status": "approved"})
+        for f in (Path(self.config["INSTANCE_DIR"]) / "ready" / "en").glob("pg-en-7*"):
+            f.unlink()                                                                       # no book file is needed just to open the library
+        fresh = ReadyShelf(Path(self.config["INSTANCE_DIR"]) / "ready")
+        self.assertGreaterEqual(fresh.count("en"), 50)
+        self.assertIsNone(fresh.read_passage("en", "pg-en-700", 0))                         # missing files are noticed and forgotten
+        self.assertFalse(fresh.has("en", "pg-en-700"))
+
+    def test_circuit_breaker_pauses_downloads_after_a_run_of_temporary_failures_and_recovers(self):
+        w = self.rt.worker; w.settings.breaker_threshold, w.settings.breaker_seconds, w.settings.max_attempts = 3, 60, 99
+        clock = [10_000.0]; w._clock = lambda: clock[0]
+        state = {"down": True, "calls": 0}
+        def flaky(book):
+            state["calls"] += 1
+            if state["down"]:
+                raise source.TransientSourceError("HTTP 503")
+            return source.clean_for_language(fake_gutenberg(book["title"], seed=book["gutenberg_id"], paragraphs=60), "en")
+        w._fetch = flaky
+        for i in range(3):
+            w.enqueue(prep.COLD, "en", self.rt.universe.random_candidates("en", 1, random.Random(i + 20))[0], 5)
+        w.run_pending(); self.assertTrue(w.breaker_open())
+        self.assertGreater(w.estimated_wait(), w.settings.max_cold_wait)                      # new draws now shed to prepared books
+        calls = state["calls"]; w.run_pending(); self.assertEqual(state["calls"], calls)       # paused: no download starts
+        clock[0] += 100; state["down"] = False
+        self.assertFalse(w.breaker_open()); w.run_pending()
+        self.assertGreater(len(w.lake_ids("en")), 0); self.assertEqual(w._fail_streak, 0)
+
+    def test_the_download_gap_is_shared_by_every_process(self):
+        import threading
+        gate_a = source.SharedRateGate(Path(self.tmp.name) / ".g", 0.15); gate_b = source.SharedRateGate(Path(self.tmp.name) / ".g", 0.15)
+        stamps = []
+        def hit(gate):
+            for _ in range(3):
+                gate.wait(); stamps.append(time.time())
+        ts = [threading.Thread(target=hit, args=(g,)) for g in (gate_a, gate_b)]
+        [t.start() for t in ts]; [t.join() for t in ts]
+        stamps.sort(); gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+        self.assertEqual(len(stamps), 6); self.assertGreater(min(gaps), 0.12)
+
+    def test_job_store_hides_finished_jobs_and_fails_abandoned_ones(self):
+        import jobstate
+        clock = [1000.0]; store = jobstate.JobStore(Path(self.tmp.name) / "j.sqlite", clock=lambda: clock[0])
+        store.upsert("k1", "en", "tokA", "cold", "running", "fetching", 40, prio=0)
+        store.upsert("k2", "en", "tokB", "cold", "queued", "queued", 6, prio=0)
+        self.assertEqual(store.view("en", "tokB")["ahead"], 1); self.assertEqual(store.pending_cold(), 2)
+        clock[0] += 1000; store.prune()
+        self.assertEqual(store.view("en", "tokA")["state"], "failed")                          # nobody finished it: reported, not stuck
+        clock[0] += 1000; store.prune(); self.assertIsNone(store.view("en", "tokA"))           # and the table never grows
+
+
+class ConditionalCatalogueTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup); self.dir = Path(self.tmp.name)
+        self.raw = write_catalog_csv(self.dir / "src.csv.gz", en=30, fr=3, zh=2).read_bytes()
+
+    def test_an_unchanged_catalogue_is_not_downloaded_again(self):
+        import urllib.error
+        sent = []
+        def opener(req, timeout):
+            sent.append(dict(req.header_items()))
+            if req.get_header("If-none-match"):
+                raise urllib.error.HTTPError(req.full_url, 304, "Not Modified", {}, None)
+            resp = SourceTests.Resp(self.raw); resp.headers["ETag"] = '"abc"'; resp.headers["Last-Modified"] = "Fri, 13 Nov 2026 00:00:00 GMT"
+            return resp
+        dest = self.dir / "got.csv.gz"
+        catalogue_csv.download(dest, opener=opener)                                            # first time: the whole file
+        with self.assertRaises(catalogue_csv.NotModified):
+            catalogue_csv.download(dest, opener=opener)                                        # second time: "has it changed?" -> no
+        self.assertEqual(sent[1]["If-none-match"], '"abc"'); self.assertEqual(sent[1]["If-modified-since"], "Fri, 13 Nov 2026 00:00:00 GMT")
+
+    def test_sync_records_the_catalogue_as_fresh_without_rebuilding(self):
+        import urllib.error
+        state = {"n": 0}
+        def opener(req, timeout):
+            state["n"] += 1
+            if state["n"] > 1:
+                raise urllib.error.HTTPError(req.full_url, 304, "Not Modified", {}, None)
+            resp = SourceTests.Resp(self.raw); resp.headers["ETag"] = '"abc"'; return resp
+        cfg = dict(TESTING=True, INSTANCE_DIR=self.dir / "inst", DB_PATH=self.dir / "a.db", BOOKS=[], DATA_DIR=self.dir / "data",
+                   EMBEDDED_WORKER=False, EN_TEXTS_DIR=self.dir / "t", TEXTS_DIR=self.dir / "t", SYNC_KWARGS={"opener": opener})
+        rt = create_app(cfg).runtime
+        self.assertTrue(rt.sync.run()); built = rt.universe_path.stat().st_ino
+        rt.sync._clock = lambda: time.time() + 3 * 86400; self.assertTrue(rt.sync.needs_run())
+        rt.sync._clock = time.time
+        os.utime(rt.universe_path, None)
+        self.assertTrue(rt.sync.run())
+        self.assertEqual(rt.sync.status()["message"], "Gutenberg catalogue is up to date.")
+        self.assertEqual(rt.universe.count("en"), 30)
+
+
+TOP_PAGE = """<html><body>
+<h2>Top 100 EBooks yesterday</h2><ol>{day}</ol>
+<h2>Top 100 Authors yesterday</h2><ol><li><a href="/ebooks/author/53">An author</a></li></ol>
+<h2>Top 100 EBooks last 7 days</h2><ol>{week}</ol>
+<h2>Top 100 EBooks last 30 days</h2><ol>{month}</ol>
+<h2>Top 100 Authors last 30 days</h2><ol><li><a href="/ebooks/author/9">Another</a></li></ol></body></html>"""
+
+
+def top_page(month_ids, week_ids=(), day_ids=()):
+    li = lambda ids: "".join(f'<li><a href="/ebooks/{i}">Book {i} by Someone (1234)</a></li>' for i in ids)
+    return TOP_PAGE.format(day=li(day_ids), week=li(week_ids), month=li(month_ids))
+
+
+class PopularityTests(OceanBase):
+    def test_parser_reads_the_lists_in_order_and_ignores_authors(self):
+        import popularity
+        lists = popularity.parse_top_page(top_page(range(2000, 2100), range(3000, 3100), range(4000, 4100)))
+        self.assertEqual(lists["month"][2000], 1); self.assertEqual(lists["month"][2099], 100); self.assertEqual(set(lists), {"month", "week", "day"})
+
+    def test_a_page_that_changed_shape_is_not_trusted(self):
+        import popularity
+        self.assertEqual(popularity.parse_top_page("<html><h2>Something else</h2></html>"), {})
+        self.assertEqual(popularity.parse_top_page(top_page(range(2000, 2005))), {})            # too short to be the real top 100
+
+    def test_badge_tiers_are_honest_and_absent_without_data(self):
+        import popularity
+        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
+        self.assertIsNone(pop.payload("en", 1000))                                              # no data: no badge, no invented number
+        opener = lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html")
+        self.assertTrue(pop.refresh(opener=opener))
+        self.assertEqual(pop.payload("en", 2000)["tier"], "jackpot"); self.assertEqual(pop.payload("en", 2050)["tier"], "lucky")
+        gem = pop.payload("en", 99999); self.assertEqual(gem["tier"], "hidden-gem"); self.assertIsNone(gem["rank"])
+        self.assertIn("popularity, not literary quality", gem["note"])
+
+    def test_the_long_tail_gets_varied_honest_lines_from_the_catalogue_percentile(self):
+        import popularity
+        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
+        deep = {"tier": "hidden-gem", "rank": 70000, "detail": "Rank #70,000 of 78,000 titles", "note": "popularity, not literary quality"}
+        self.assertIsNone(pop.payload("en", 1, deep=None))                                       # no data of any kind: no badge
+        gem = pop.payload("en", 1, deep=deep)                                                    # the percentile alone is enough for a badge
+        self.assertEqual((gem["tier"], gem["rank"], gem["detail"]), ("hidden-gem", 70000, deep["detail"]))
+        self.assertEqual(gem, pop.payload("en", 1, deep=deep))                                   # a book always wears the same line
+        labels = {pop.payload("en", gid, deep=deep)["label"] for gid in range(1, 20)}
+        self.assertGreaterEqual(len(labels), 3)                                                  # but a run of spins is not repeated text
+        for tier in ("jackpot", "lucky", "discovery"):
+            got = pop.payload("en", 7, deep={**deep, "tier": tier}); self.assertEqual(got["tier"], tier); self.assertTrue(got["short"]); self.assertLessEqual(len(got["short"]), 24)
+        pop.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html"))
+        self.assertEqual(pop.payload("en", 2003, deep=deep)["tier"], "jackpot")                  # the public monthly list outranks the percentile
+        self.assertEqual(pop.payload("en", 99999)["tier"], "hidden-gem"); self.assertIn("top 100", pop.payload("en", 99999)["label"])   # no percentile: no claim about the bottom 10%
+
+    def test_a_failed_refresh_keeps_the_last_good_data_and_says_why(self):
+        import popularity, urllib.error
+        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
+        pop.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html"))
+        def down(req, timeout): raise urllib.error.URLError("offline")
+        self.assertFalse(pop.refresh(opener=down)); self.assertIn("offline", pop.last_error)
+        self.assertEqual(pop.payload("en", 2000)["tier"], "jackpot")
+        self.assertFalse(pop.refresh(opener=lambda req, timeout: SourceTests.Resp(b"<html>nope</html>", "text/html")))   # changed page: keep old data
+
+    def test_reveal_shows_a_fresh_badge_and_the_event_for_sharing_is_accepted(self):
+        record = self.rt.universe.random_candidates("en", 1, random.Random(2))[0]
+        self.rt.worker.enqueue(prep.COLD, "en", record, 0); self.rt.worker.run_pending()
+        ids = [record["gutenberg_id"]] + list(range(5000, 5099))
+        self.rt.popularity.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(ids).encode(), "text/html"))
+        handle = self.rt.catalogues["en"].book_token(record["id"])
+        book = self.post("/api/book/reveal", book_token=handle)["book"]
+        self.assertEqual(book["popularity"]["tier"], "jackpot")
+        self.assertTrue(self.post("/api/event", event="share_created", book_token=handle)["ok"])
+        self.rt.popularity.path.write_text(json.dumps({"updated": 0}))                           # data vanished: the badge goes with it
+        self.assertIsNone(self.post("/api/book/reveal", book_token=handle)["book"]["popularity"])
+
+
+class SecretKeyTests(unittest.TestCase):
+    def test_workers_starting_at_the_same_moment_get_the_same_key(self):
+        import threading, runtime
+        d = Path(tempfile.mkdtemp()); keys = []
+        os.environ.pop("LR_SECRET_KEY", None)
+        ts = [threading.Thread(target=lambda: keys.append(runtime.load_secret(d))) for _ in range(12)]
+        [t.start() for t in ts]; [t.join() for t in ts]
+        self.assertEqual(len(set(keys)), 1); self.assertEqual(len(keys), 12)
+
+
 class SourceTests(unittest.TestCase):
     class Resp:
         def __init__(self, body, ctype="text/plain", length=True):
@@ -624,8 +837,27 @@ class SourceTests(unittest.TestCase):
 
     def test_download_reports_real_progress(self):
         seen = []
-        raw = source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000), progress=seen.append)
+        raw = source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000), progress=lambda f, got=None: seen.append(f))
         self.assertEqual(len(raw), 200_000); self.assertEqual(seen[-1], 1.0); self.assertEqual(seen, sorted(seen))
+
+    def test_unknown_size_reports_bytes_not_a_stuck_percentage(self):
+        seen = []
+        source.download(self.URL, 1, opener=lambda req, timeout: self.Resp(b"x" * 200_000, length=False), progress=lambda f, got=None: seen.append((f, got)))
+        self.assertTrue(all(f is None for f, _ in seen)); self.assertEqual(seen[-1][1], 200_000)
+
+    def test_a_trickling_server_is_cut_off_by_the_deadline(self):
+        class Slow(self.Resp):
+            def read(self, n=-1):
+                time.sleep(0.03); return super().read(1000)
+        with self.assertRaises(source.TransientSourceError):
+            source.download(self.URL, 1, opener=lambda req, timeout: Slow(b"x" * 500_000), deadline=0.1)
+
+    def test_default_timeouts_are_short_so_a_silent_server_cannot_hang_a_reader(self):
+        self.assertLessEqual(source.CONNECT_TIMEOUT, 10); self.assertLessEqual(source.TOTAL_DEADLINE, 60)
+        seen = {}
+        def opener(req, timeout):
+            seen["timeout"] = timeout; return self.Resp(b"x" * 1000)
+        source.download(self.URL, 1, opener=opener); self.assertEqual(seen["timeout"], source.CONNECT_TIMEOUT)
 
     def test_errors_are_classified_for_the_worker(self):
         import urllib.error
@@ -654,12 +886,18 @@ class SourceFallbackTests(unittest.TestCase):
         with self.assertRaises(source.PermanentSourceError): source.fetch_clean_text(book, downloader=none)
         def busy(url, gid, **kw): raise source.TransientSourceError("HTTP 503")
         with self.assertRaises(source.TransientSourceError): source.fetch_clean_text(book, downloader=busy)
+        calls = []
+        def slow_then_fine(url, gid, **kw):                               # the first address is silent/slow: fail over at once
+            calls.append(url)
+            if "dev." in url: raise source.TransientSourceError("timed out")
+            return text.encode("utf-8")
+        self.assertGreater(len(source.fetch_clean_text(book, downloader=slow_then_fine)), 500); self.assertEqual(len(calls), 2)
 
 
 class FrontEndTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_javascript_logic(self):
-        for script in ("front_tests.mjs", "storage_tests.mjs"):
+        for script in ("front_tests.mjs", "storage_tests.mjs", "share_tests.mjs"):
             out = subprocess.run(["node", f"tests/js/{script}"], capture_output=True, text=True, timeout=120)
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
 

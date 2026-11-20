@@ -101,6 +101,9 @@ export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = 
         if (e.source === source && e.bookKey === bookKey && !e.revealed) await db.put("history", { ...e, revealed: true, title, author });
       }
     },
+    async wasRevealed(source, bookKey) {     // only the recent history is kept, so this means "recently", not "ever"
+      return (await db.getAll("history")).some((e) => e.source === source && e.bookKey === bookKey && e.revealed);
+    },
     removeHistory: (id) => db.remove("history", id),
     clearHistory: () => db.clear("history"),
 

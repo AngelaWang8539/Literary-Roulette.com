@@ -115,7 +115,16 @@ class CatalogueSync:
                 path = self.csv_path
                 progress("Using your saved catalogue file\u2026", 55)
             else:
-                path = catalogue_csv.download(self.download_path, progress, urls=self.urls, opener=self.opener)
+                try:
+                    path = catalogue_csv.download(self.download_path, progress, urls=self.urls, opener=self.opener)
+                except catalogue_csv.NotModified:
+                    if self.rt.universe.available:             # unchanged since last time: just record that it is fresh
+                        universe_mod.touch(self.rt.universe_path)
+                        self.rt.universe.reload(force=True)
+                        self._set(state="ready", running=False, percent=100, error=None,
+                                  message="Gutenberg catalogue is up to date.")
+                        return True
+                    path = self.download_path                    # (index missing but the file is there: rebuild from it)
             records = catalogue_csv.read_records(path, progress)
             counts = universe_mod.build_from_records(records, self.rt.universe_path, blocked=self.rt.universe.blocked,
                                                      log=log.info, progress=progress)
@@ -148,6 +157,8 @@ class CatalogueSync:
         while not self._stop.is_set():
             wait = self.max_age
             try:
+                if getattr(self.rt, "popularity", None):       # best effort: the badge data refreshes about daily, never blocks anything
+                    self.rt.popularity.refresh_if_stale()
                 if self.needs_run():
                     ok = self.run()
                     wait = self.max_age if ok else self.retry_seconds

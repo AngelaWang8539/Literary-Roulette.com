@@ -232,6 +232,13 @@ html:lang(fr) .btn.is-slow .label::after { content: " (chargement)"; }
 .popularity-label { font-weight: 600; color: var(--forest); }
 .popularity-detail { color: inherit; opacity: .8; }
 .popularity-badge.tier-jackpot, .popularity-badge.tier-lucky { background: rgba(176, 132, 38, .14); border-color: #b08426; }
+.popularity-badge.tier-discovery { background: rgba(31, 61, 50, .09); border-color: #5e9467; }
+.popularity-badge.tier-hidden-gem { background: rgba(48, 66, 110, .09); border-color: #6f7fa8; }
+.popularity-label::before { margin-right: .45rem; }                /* the mark is decoration; the words say everything */
+.tier-jackpot .popularity-label::before { content: "\2605"; color: #b08426; }
+.tier-lucky .popularity-label::before, .tier-discovery .popularity-label::before { content: "\2726"; color: #b08426; }
+.tier-hidden-gem .popularity-label::before { content: "\25C6"; color: #6f7fa8; }
+.popularity-new { align-self: flex-start; padding: .05rem .55rem; border-radius: 999px; font-size: .8rem; font-weight: 600; background: var(--ink); color: #fff; }
 
 /* ===== 0.7: library-paper minimalism, modelled on the desktop app =====
    White page, ink-black type, one warm tan, cream reading area, hairline borders, Georgia for reading. */
@@ -270,7 +277,8 @@ a { color: var(--ink); }
 .banner { background: #f0f0f0; border-left-color: var(--ink); }
 .demo-notice { background: var(--tan); }
 .popularity-badge { border-color: var(--ink); background: #fff; }
-.popularity-badge.tier-jackpot, .popularity-badge.tier-lucky { background: var(--tan); border-color: var(--ink); }
+.popularity-badge.tier-jackpot, .popularity-badge.tier-lucky, .popularity-badge.tier-discovery, .popularity-badge.tier-hidden-gem { background: var(--tan); border-color: var(--ink); }
+.popularity-label::before { color: var(--ink) !important; }
 .cover { background: var(--ink); }
 .site-footer { border-top: 1px solid var(--line); }
 @media (max-width: 860px) { .passage-card { min-height: 21rem; } .passage-text { font-size: 1.22rem; } }
@@ -294,3 +302,8 @@ a { color: var(--ink); }
 .banner.warn { background: var(--tan); border-left-color: var(--ink); }
 #storage-reason { color: var(--muted); font-size: .85em; }
 .language-choice.is-planned { background: var(--panel); }
+
+/* a moving bar while a download has not said how big it is (never a stuck, invented percentage) */
+.librarian .bar.indet i { width: 35%; animation: lr-indet 1.3s ease-in-out infinite alternate; }
+@keyframes lr-indet { from { margin-left: 0; } to { margin-left: 65%; } }
+@media (prefers-reduced-motion: reduce) { .librarian .bar.indet i { animation: none; margin-left: 32%; } }

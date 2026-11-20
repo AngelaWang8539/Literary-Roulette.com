@@ -4,9 +4,11 @@ import os
 import secrets
 import shutil
 import threading
+import time
 from pathlib import Path
 
 import catalogue_sync
+import popularity as popularity_mod
 import prep
 import universe as universe_mod
 from library import Catalogue, load_json_list, load_manifest
@@ -17,14 +19,25 @@ log = logging.getLogger("literary_roulette.runtime")
 
 
 def load_secret(instance_dir):
+    """The signing key. Use LR_SECRET_KEY on several machines. On one machine it is created once, atomically, so several
+    Gunicorn workers starting at the same moment all end up with the SAME key (otherwise their tickets would not match)."""
     env = os.environ.get("LR_SECRET_KEY")
     if env:
         return env
     instance_dir.mkdir(parents=True, exist_ok=True)
     path = instance_dir / "secret.key"
-    if not path.exists():
-        path.write_text(secrets.token_hex(32), encoding="utf-8")
-    return path.read_text(encoding="utf-8").strip()
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(secrets.token_hex(32))
+    except FileExistsError:
+        pass
+    for _ in range(50):                                 # the creating process may still be writing
+        value = path.read_text(encoding="utf-8").strip()
+        if len(value) >= 32:
+            return value
+        time.sleep(0.05)
+    raise RuntimeError("The secret key file is empty; delete instance/secret.key and start again.")
 
 
 def settings_from_env(overrides=None):
@@ -82,6 +95,7 @@ class Runtime:
         self.status_path = instance_dir / "catalogue_status.json"
         self.csv_override = config.get("CATALOG_CSV") or os.environ.get("LR_CATALOG_CSV")
         self.max_age_hours = float(config.get("CATALOGUE_MAX_AGE_HOURS", 24))
+        self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json")
         self.sync = None
         self.settings = settings_from_env(config.get("PREP_SETTINGS"))
         self.worker = prep.PrepWorker(self.shelf, self.catalogues, self.universe, self.shelf_dir, self.settings,

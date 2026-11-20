@@ -1,0 +1,527 @@
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/analytics.py final/analytics.py
+--- stage2b/analytics.py	2026-11-14 10:31:35.115637743 +0000
++++ final/analytics.py	2026-11-14 10:31:36.891724071 +0000
+@@ -19,7 +19,7 @@
+ EVENTS = (
+     "passage_displayed", "another_passage_requested", "book_revealed", "book_hidden",
+     "another_book_requested", "read_link_clicked", "borrow_link_clicked", "buy_link_clicked",
+-    "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure",
++    "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure", "share_created",
+ )
+ 
+ 
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/app.py final/app.py
+--- stage2b/app.py	2026-11-14 10:31:35.116696937 +0000
++++ final/app.py	2026-11-14 10:31:36.892721075 +0000
+@@ -21,7 +21,7 @@
+ 
+ SITE = {"creator_name": "[Your Name]", "contact_email": "[rights contact email to be added]"}
+ EVENT_NAMES = ("passage_displayed", "another_passage_requested", "another_book_requested", "book_hidden",
+-               "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure")
++               "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure", "share_created")
+ EVENT_INTEREST = {"passage_displayed": "displayed", "another_passage_requested": "another", "book_saved": "saved"}
+ MAX_SEEN_TOKENS = 300
+ STAGE_TEXT = {"queued": "Waiting in the queue", "fetching": "Fetching this edition", "cleaning": "Cleaning the text",
+@@ -320,7 +320,10 @@
+         index = payload["index"] if payload and payload["book_token"] == body.get("book_token") else None
+         analytics.log_event(db_path, "book_revealed", book["id"], f"{book['id']}:{index}" if index is not None else None)
+         rt.shelf.note_interest(language, book["id"], "reveal")
+-        return jsonify(ok=True, language=language, book=cat.book_payload(book, index))
++        payload_ = cat.book_payload(book, index)
++        if str(book.get("gutenberg_id") or "").isdigit():       # popularity is looked up fresh at reveal time, never stored stale
++            payload_["popularity"] = rt.popularity.payload(language, book["gutenberg_id"])
++        return jsonify(ok=True, language=language, book=payload_)
+ 
+     @app.post("/api/event")
+     def event():
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/catalogue_sync.py final/catalogue_sync.py
+--- stage2b/catalogue_sync.py	2026-11-14 10:31:35.116847456 +0000
++++ final/catalogue_sync.py	2026-11-14 10:31:36.892947222 +0000
+@@ -157,6 +157,8 @@
+         while not self._stop.is_set():
+             wait = self.max_age
+             try:
++                if getattr(self.rt, "popularity", None):       # best effort: the badge data refreshes about daily, never blocks anything
++                    self.rt.popularity.refresh_if_stale()
+                 if self.needs_run():
+                     ok = self.run()
+                     wait = self.max_age if ok else self.retry_seconds
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/popularity.py final/popularity.py
+--- stage2b/popularity.py	1970-01-01 00:00:00.000000000 +0000
++++ final/popularity.py	2026-11-14 10:31:36.893043010 +0000
+@@ -0,0 +1,110 @@
++"""Popularity for the reveal reward ("Jackpot!" ... "Off the beaten shelf"), from Project Gutenberg's own public most-read lists.
++
++Only the top-100 lists are public, so the badge is honest about what it knows:
++  top 10 this month  -> jackpot        top 100 this month -> popular right now        otherwise -> off the beaten shelf
++Refreshed about once a day. If the page cannot be fetched or no longer looks as expected, the last good data is kept; with no
++data at all there is simply no badge. A badge never invents a number. Pluggable: any other source only has to produce
++{"month": {gutenberg_id: rank}} (see parse_top_page) to replace this one.
++"""
++import json
++import os
++import re
++import time
++import urllib.error
++import urllib.request
++from pathlib import Path
++
++import source
++
++TOP_URL = "https://www.gutenberg.org/browse/scores/top"
++LISTS = {"month": "last 30 days", "week": "last 7 days", "day": "yesterday"}
++MIN_ENTRIES = 20                    # a list shorter than this means the page changed shape: do not trust it
++NOTE = "From Project Gutenberg's public most-read lists for the last 30 days. This is popularity, not literary quality."
++
++
++def parse_top_page(html):
++    """{'month': {gutenberg_id: rank}, ...} from the 'Top 100 EBooks ...' lists on Gutenberg's top page. Unrecognised lists are left out."""
++    found = {}
++    for part in re.split(r"(?i)<h2\b", html)[1:]:
++        heading, _sep, body = part.partition("</h2>")
++        heading = re.sub(r"<[^>]+>", " ", heading).lower()
++        if "ebook" not in heading:
++            continue
++        for key, phrase in LISTS.items():
++            if phrase in heading and key not in found:
++                ids = []
++                for m in re.finditer(r"/ebooks/(\d+)", body):
++                    gid = int(m.group(1))
++                    if gid not in ids:
++                        ids.append(gid)
++                found[key] = {gid: rank for rank, gid in enumerate(ids[:100], start=1)}
++    return {k: v for k, v in found.items() if len(v) >= MIN_ENTRIES}
++
++
++class Popularity:
++    def __init__(self, path, clock=time.time, max_age_hours=24.0):
++        self.path, self._clock, self.max_age = Path(path), clock, float(max_age_hours) * 3600
++        self.last_error = None
++        self._data, self._stamp = {}, None
++
++    def _load(self):
++        try:
++            stamp = self.path.stat().st_mtime_ns
++        except OSError:
++            self._data, self._stamp = {}, None
++            return
++        if stamp != self._stamp:
++            try:
++                self._data = json.loads(self.path.read_text(encoding="utf-8"))
++            except (OSError, ValueError):
++                self._data = {}
++            self._stamp = stamp
++
++    def rank(self, gid):
++        self._load()
++        return (self._data.get("month") or {}).get(str(int(gid)))
++
++    def available(self):
++        self._load()
++        return bool(self._data.get("month"))
++
++    def payload(self, language, gid):
++        """The badge for one book, or None when there is nothing true to say."""
++        if not self.available():
++            return None
++        rank = self.rank(gid)
++        if rank is not None and rank <= 10:
++            tier, label = "jackpot", "Jackpot! One of Gutenberg's 10 most-read books this month"
++        elif rank is not None:
++            tier, label = "lucky", "Popular right now: in Gutenberg's top 100 this month"
++        else:
++            tier, label = "hidden-gem", "Off the beaten shelf: not among Gutenberg's most-read books this month"
++        return {"tier": tier, "label": label, "detail": f"Ranked #{rank} in Gutenberg's monthly top 100" if rank is not None else "",
++                "note": NOTE, "rank": rank, "source_url": TOP_URL, "snapshot_date": time.strftime("%Y-%m-%d", time.gmtime(self._data.get("updated", 0)))}
++
++    def stale(self):
++        self._load()
++        return self._clock() - float(self._data.get("updated", 0)) > self.max_age
++
++    def refresh(self, opener=urllib.request.urlopen, timeout=15):
++        """Fetch and store the lists. True on success; on any problem the previous data stays and last_error says why."""
++        try:
++            req = urllib.request.Request(TOP_URL, headers={"User-Agent": source.USER_AGENT})
++            with opener(req, timeout=timeout) as response:
++                html = response.read(3_000_000).decode("utf-8", errors="replace")
++            lists = parse_top_page(html)
++            if "month" not in lists:
++                raise ValueError("the page no longer shows the 30-day top list in the expected form")
++            data = {"updated": self._clock(), **{k: {str(g): r for g, r in v.items()} for k, v in lists.items()}}
++            self.path.parent.mkdir(parents=True, exist_ok=True)
++            tmp = self.path.with_name(self.path.name + f".{os.getpid()}.tmp")
++            tmp.write_text(json.dumps(data), encoding="utf-8")
++            os.replace(tmp, self.path)
++            self.last_error = None
++            return True
++        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
++            self.last_error = str(getattr(exc, "reason", exc))
++            return False
++
++    def refresh_if_stale(self, **kw):
++        return self.refresh(**kw) if self.stale() else False
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/runtime.py final/runtime.py
+--- stage2b/runtime.py	2026-11-14 10:31:35.133305718 +0000
++++ final/runtime.py	2026-11-14 10:31:36.892649450 +0000
+@@ -8,6 +8,7 @@
+ from pathlib import Path
+ 
+ import catalogue_sync
++import popularity as popularity_mod
+ import prep
+ import universe as universe_mod
+ from library import Catalogue, load_json_list, load_manifest
+@@ -94,6 +95,7 @@
+         self.status_path = instance_dir / "catalogue_status.json"
+         self.csv_override = config.get("CATALOG_CSV") or os.environ.get("LR_CATALOG_CSV")
+         self.max_age_hours = float(config.get("CATALOGUE_MAX_AGE_HOURS", 24))
++        self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json")
+         self.sync = None
+         self.settings = settings_from_env(config.get("PREP_SETTINGS"))
+         self.worker = prep.PrepWorker(self.shelf, self.catalogues, self.universe, self.shelf_dir, self.settings,
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/static/js/app.js final/static/js/app.js
+--- stage2b/static/js/app.js	2026-11-14 10:31:35.114317064 +0000
++++ final/static/js/app.js	2026-11-14 10:31:36.890462199 +0000
+@@ -6,6 +6,7 @@
+ import * as roulette from "./roulette.js";
+ import * as Librarian from "./librarian.js";
+ import { createTicketPouch } from "./tickets.js";
++import { cardBlob, shareOrDownload } from "./sharecard.js";
+ 
+ const $ = (id) => document.getElementById(id);
+ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+@@ -241,11 +242,28 @@
+   openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
+   ready.then(() => lib.markBookRevealed(S.source, S.bookKey, book)).catch(() => {});
+   ui.awareness.hidden = S.source !== "catalogue";
++  const shareBtn = $("btn-share"); if (shareBtn) shareBtn.hidden = S.source !== "catalogue";        // an uploaded book is private: never offered for sharing
+   setStatus("Book revealed. Your passage has not changed.");
+   ui.details.focus({ preventScroll: true });
+   ui.details.scrollIntoView({ block: "nearest", behavior: reduceMotion() ? "auto" : "smooth" });
+ }
+ 
++// ---------- share the discovery: a picture made on this device ----------
++$("btn-share")?.addEventListener("click", async () => {
++  if (S.source !== "catalogue" || !S.book) return;
++  const note = $("share-note"), btn = $("btn-share");
++  btn.setAttribute("aria-disabled", "true");
++  try {
++    const blob = await cardBlob({ text: ui.text.textContent, title: S.book.title, author: S.book.author,
++      badge: S.book.popularity && S.book.popularity.label, host: location.host });
++    const how = await shareOrDownload(blob, { title: S.book.title, url: location.origin });
++    if (how !== "cancelled") logEvent("share_created");
++    note.textContent = how === "downloaded" ? "Your card was saved as a picture. Post it anywhere you like." : how === "shared" ? "Shared." : "";
++    note.hidden = !note.textContent;
++  } catch { note.textContent = "Sorry, the card could not be made on this device."; note.hidden = false; }
++  btn.removeAttribute("aria-disabled");
++});
++
+ // ---------- uploaded books: the three actions, run locally ----------
+ const upBook = (id) => S.up.books.find((b) => b.id === id);
+ const seenSet = (id) => { if (!S.up.seenP.has(id)) S.up.seenP.set(id, new Set()); return S.up.seenP.get(id); };
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/static/js/i18n.js final/static/js/i18n.js
+--- stage2b/static/js/i18n.js	2026-11-14 10:31:35.114472850 +0000
++++ final/static/js/i18n.js	2026-11-14 10:31:36.890643109 +0000
+@@ -70,6 +70,14 @@
+     ["Waiting for a free librarian · {n} ahead", "等待空闲的图书管理员 · 前面还有 {n} 本", "En attente d’un bibliothécaire libre · {n} avant vous"],
+     ["Gutenberg is slow for this one, so the librarian is drawing another book.", "这本书古腾堡响应很慢，图书管理员正在另抽一本。", "Gutenberg est lent pour celui-ci ; la bibliothécaire tire un autre livre."],
+     ["Fetching this edition · {n} MB", "正在取来这一版 · {n} MB", "Récupération de cette édition · {n} Mo"],
++    ["Share this discovery", "分享这次发现", "Partager cette découverte"],
++    ["Your card was saved as a picture. Post it anywhere you like.", "卡片已保存为图片，可以发到任何地方。", "Votre carte a été enregistrée en image. Publiez-la où vous voulez."],
++    ["Shared.", "已分享。", "Partagé."],
++    ["Sorry, the card could not be made on this device.", "抱歉，这台设备无法生成卡片。", "Désolé, la carte n’a pas pu être créée sur cet appareil."],
++    ["Jackpot! One of Gutenberg's 10 most-read books this month", "大奖！古腾堡本月阅读量前十的书之一", "Jackpot ! L’un des 10 livres les plus lus de Gutenberg ce mois-ci"],
++    ["Popular right now: in Gutenberg's top 100 this month", "当下热门：古腾堡本月前一百名", "Populaire en ce moment : dans le top 100 de Gutenberg ce mois-ci"],
++    ["Off the beaten shelf: not among Gutenberg's most-read books this month", "冷门书架：不在古腾堡本月最受欢迎的书之列", "Hors des sentiers battus : pas parmi les livres les plus lus de Gutenberg ce mois-ci"],
++    ["Ranked #{n} in Gutenberg's monthly top 100", "位列古腾堡月榜前一百的第 {n} 名", "Classé n° {n} du top 100 mensuel de Gutenberg"],
+     ["Loading…", "加载中……", "Chargement…"],
+     ["Spin for a passage", "转一转，抽一段文字", "Tirer un passage"],
+     ["What would you like to do?", "你想做什么？", "Que souhaitez-vous faire ?"],
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/static/js/sharecard.js final/static/js/sharecard.js
+--- stage2b/static/js/sharecard.js	1970-01-01 00:00:00.000000000 +0000
++++ final/static/js/sharecard.js	2026-11-14 10:31:36.891117784 +0000
+@@ -0,0 +1,97 @@
++// The share card: a picture of the passage you drew, with the book it came from, drawn in the browser on a canvas.
++// Nothing is uploaded: the text never leaves the device unless the visitor chooses to post the picture themselves.
++export const CARD = { width: 1080, height: 1350, margin: 96, excerptChars: 330, maxExcerptLines: 11 };
++const PAPER = "#faf7f0", INK = "#202020", MUTED = "#555555", TAN = "#ece4d6", LINE = "#d0d0d0";
++const SERIF = 'Georgia, "Times New Roman", serif';
++
++/** A readable excerpt: whole words, ends on a sentence if one is near, with an ellipsis when cut. */
++export function excerpt(text, max = CARD.excerptChars) {
++  const clean = String(text || "").replace(/\s+/g, " ").trim();
++  if (clean.length <= max) return clean;
++  let cut = clean.slice(0, max);
++  const sentence = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "), cut.lastIndexOf("\u3002"));
++  if (sentence > max * 0.6) return cut.slice(0, sentence + 1);
++  const space = cut.lastIndexOf(" ");
++  cut = space > max * 0.6 ? cut.slice(0, space) : cut;                 // Chinese has no spaces: cut at the limit
++  return cut.replace(/[\s,;:\u2014-]+$/, "") + "\u2026";
++}
++
++/** Greedy line breaking with the canvas's own measurement. Words that are too long are split so nothing overflows. */
++export function wrapLines(measure, text, maxWidth, maxLines = Infinity) {
++  const tokens = /\s/.test(text) ? text.split(/\s+/) : Array.from(text);       // words, or single characters for Chinese
++  const glue = /\s/.test(text) ? " " : "";
++  const lines = []; let line = "";
++  for (let token of tokens) {
++    while (measure(token) > maxWidth && token.length > 1) {                       // a single huge word
++      let n = token.length; while (n > 1 && measure(token.slice(0, n)) > maxWidth) n--;
++      if (line) { lines.push(line); line = ""; }
++      lines.push(token.slice(0, n)); token = token.slice(n);
++    }
++    const trial = line ? line + glue + token : token;
++    if (measure(trial) <= maxWidth) line = trial; else { if (line) lines.push(line); line = token; }
++  }
++  if (line) lines.push(line);
++  if (lines.length > maxLines) { const kept = lines.slice(0, maxLines); kept[maxLines - 1] = kept[maxLines - 1].replace(/[\s,;:.\u2014-]+$/, "") + "\u2026"; return kept; }
++  return lines;
++}
++
++/** Draw the card. `data` = { text, title, author, badge?, host }. Returns the lines used (for tests). */
++export function drawCard(ctx, data, size = CARD) {
++  const { width, height, margin } = size, inner = width - margin * 2;
++  const font = (px, style = "normal", weight = "normal") => { ctx.font = `${style} ${weight} ${px}px ${SERIF}`; return (t) => ctx.measureText(t).width; };
++  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, width, height);
++  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.strokeRect(36, 36, width - 72, height - 72);
++  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
++
++  ctx.fillStyle = INK; font(34, "normal", "bold"); ctx.fillText("LITERARY ROULETTE", margin, 130);
++  ctx.fillStyle = MUTED; font(26, "italic"); ctx.fillText("A library of stories. One draw chooses the book.", margin, 172);
++  ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(margin, 205); ctx.lineTo(width - margin, 205); ctx.stroke();
++
++  // Lay the lower block out from the bottom up (footer, badge, author, title), so a long title or badge can never collide
++  // with the footer; the passage then gets whatever room is left above it.
++  const measureBadge = font(28);
++  const badgeLines = data.badge ? wrapLines(measureBadge, data.badge, inner - 48, 2) : [];
++  const measureTitle = font(54, "normal", "bold");
++  const title = wrapLines(measureTitle, data.title || "", inner, 2);
++  let y = height - 175;
++  const boxH = badgeLines.length ? 20 + badgeLines.length * 38 : 0;
++  if (boxH) { y -= boxH; var boxTop = y; y -= 30; }
++  const authorY = y; y -= 58;
++  const lastTitleY = y, firstTitleY = lastTitleY - 62 * (title.length - 1), ruleY = firstTitleY - 74;
++
++  const measureBody = font(46);
++  const room = Math.max(1, Math.floor((ruleY - 45 - 290) / 68) + 1);
++  const body = wrapLines(measureBody, excerpt(data.text), inner, Math.min(room, size.maxExcerptLines ?? CARD.maxExcerptLines));
++  ctx.fillStyle = INK; let by = 290; body.forEach((l) => { ctx.fillText(l, margin, by); by += 68; });
++
++  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(margin, ruleY); ctx.lineTo(margin + 120, ruleY); ctx.stroke();
++  font(54, "normal", "bold"); ctx.fillStyle = INK; title.forEach((l, i) => ctx.fillText(l, margin, firstTitleY + i * 62));
++  font(36, "italic"); ctx.fillStyle = MUTED; ctx.fillText("by " + (data.author || ""), margin, authorY);
++  if (boxH) {
++    ctx.fillStyle = TAN; ctx.fillRect(margin, boxTop, inner, boxH);
++    font(28); ctx.fillStyle = INK; badgeLines.forEach((l, i) => ctx.fillText(l, margin + 24, boxTop + 14 + 28 + i * 38));
++  }
++  ctx.fillStyle = INK; font(30, "italic"); ctx.fillText("Reading has gone completely random.", margin, height - 118);
++  ctx.fillStyle = MUTED; font(26); ctx.fillText(data.host || "", margin, height - 76);
++  return { body, title };
++}
++
++/** Build the PNG in the browser. */
++export async function cardBlob(data, doc = document) {
++  if (doc.fonts && doc.fonts.ready) { try { await doc.fonts.ready; } catch { /* draw with what we have */ } }
++  const canvas = doc.createElement("canvas"); canvas.width = CARD.width; canvas.height = CARD.height;
++  drawCard(canvas.getContext("2d"), data);
++  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not make the picture."))), "image/png"));
++}
++
++/** Share the picture with the device's own share sheet if it can; otherwise download it. Returns "shared" | "downloaded" | "cancelled". */
++export async function shareOrDownload(blob, { title, url, filename = "literary-roulette-discovery.png" }, nav = navigator, doc = document) {
++  const file = new File([blob], filename, { type: "image/png" });
++  if (nav.canShare && nav.canShare({ files: [file] }) && nav.share) {
++    try { await nav.share({ files: [file], title, text: "Spin your own book: " + url, url }); return "shared"; }
++    catch (err) { if (err && err.name === "AbortError") return "cancelled"; /* otherwise fall back to download */ }
++  }
++  const a = doc.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename;
++  doc.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
++  return "downloaded";
++}
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/templates/index.html final/templates/index.html
+--- stage2b/templates/index.html	2026-11-14 10:31:35.115210028 +0000
++++ final/templates/index.html	2026-11-14 10:31:36.891334904 +0000
+@@ -70,7 +70,9 @@
+     <div class="row">
+       <button id="btn-save" class="btn quiet" type="button" aria-pressed="false">Save this book</button>
+       <button id="btn-hide" class="btn quiet" type="button">Hide book details</button>
++      <button id="btn-share" class="btn quiet" type="button" hidden>Share this discovery</button>
+     </div>
++    <p id="share-note" class="meta" hidden></p>
+     <div id="awareness" class="awareness" role="group" aria-labelledby="aw-q" hidden>
+       <p id="aw-q">Had you heard of this book before today?</p>
+       <button class="btn quiet" type="button" data-answer="known">Yes</button>
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/tests/js/share_tests.mjs final/tests/js/share_tests.mjs
+--- stage2b/tests/js/share_tests.mjs	1970-01-01 00:00:00.000000000 +0000
++++ final/tests/js/share_tests.mjs	2026-11-14 10:31:35.173223241 +0000
+@@ -0,0 +1,63 @@
++// Share card tests. Run: node tests/js/share_tests.mjs
++import assert from "node:assert/strict";
++import { excerpt, wrapLines, drawCard, shareOrDownload, CARD } from "../../static/js/sharecard.js";
++let passed = 0, failed = 0;
++async function test(name, fn) { try { await fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e)); } }
++const measure = (t) => t.length * 20;
++
++function fakeCtx() {
++  const calls = []; const ctx = { font: "", fillStyle: "", strokeStyle: "", lineWidth: 0, textBaseline: "", textAlign: "",
++    fillRect() {}, strokeRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
++    measureText: (t) => ({ width: measure(t) }), fillText: (t, x, y) => calls.push({ t, x, y }) };
++  return { ctx, calls };
++}
++
++await test("an excerpt is whole words, short enough, and ends on a sentence when one is near", () => {
++  const long = ("The quick brown fox jumps over the lazy dog. " .repeat(30)).trim();
++  const e = excerpt(long, 120); assert.ok(e.length <= 121); assert.ok(e.endsWith(".") || e.endsWith("\u2026"));
++  assert.equal(excerpt("Short text.", 120), "Short text.");
++  assert.ok(!/\s{2}/.test(excerpt("a   b \n\n c", 50)));
++  const zh = excerpt("\u4f60\u597d\u3002".repeat(100), 60); assert.ok(zh.length <= 61);
++});
++await test("lines never exceed the width, a giant word is split, and too many lines end with an ellipsis", () => {
++  const lines = wrapLines(measure, "alpha beta gamma delta epsilon zeta eta theta iota kappa", 200);
++  assert.ok(lines.every((l) => measure(l) <= 200)); assert.equal(lines.join(" "), "alpha beta gamma delta epsilon zeta eta theta iota kappa");
++  const huge = wrapLines(measure, "x".repeat(60), 200); assert.ok(huge.every((l) => measure(l) <= 200)); assert.equal(huge.join(""), "x".repeat(60));
++  const cut = wrapLines(measure, "word ".repeat(80).trim(), 200, 3); assert.equal(cut.length, 3); assert.ok(cut[2].endsWith("\u2026"));
++  const zh = wrapLines(measure, "\u4f60\u597d\u4e16\u754c".repeat(20), 200); assert.ok(zh.every((l) => measure(l) <= 200));
++});
++await test("the card holds the passage, title, author, badge and footer, all inside the picture", () => {
++  const { ctx, calls } = fakeCtx();
++  const used = drawCard(ctx, { text: "A passage from an unnamed book. ".repeat(40), title: "The Lost World", author: "Arthur Conan Doyle", badge: "Jackpot! One of Gutenberg's 10 most-read books this month", host: "127.0.0.1:5000" });
++  const texts = calls.map((c) => c.t);
++  assert.ok(texts.includes("The Lost World")); assert.ok(texts.includes("by Arthur Conan Doyle")); assert.ok(texts.some((t) => t.startsWith("Jackpot")));
++  assert.ok(texts.includes("Reading has gone completely random.")); assert.ok(texts.includes("127.0.0.1:5000"));
++  assert.ok(used.body.length >= 1 && used.body.length <= CARD.maxExcerptLines);
++  assert.ok(calls.every((c) => c.x >= 0 && c.x + measure(c.t) <= CARD.width && c.y > 0 && c.y < CARD.height));
++});
++await test("nothing overlaps: passage, rule, title, author, badge and footer stack in order even with a long title and badge", () => {
++  const { ctx, calls } = fakeCtx();
++  const badge = "Off the beaten shelf: not among Gutenberg's most-read books this month";
++  const used = drawCard(ctx, { text: "word ".repeat(120), title: "Freedom's Battle: Being a Comprehensive Collection of Writings and Speeches", author: "Gandhi, Mahatma", badge, host: "h" });
++  const y = (t) => calls.find((c) => c.t === t || c.t.startsWith(t)).y;
++  const lastBody = calls.filter((c) => used.body.includes(c.t)).at(-1).y;
++  const titleFirst = y(used.title[0]); const author = y("by Gandhi"); const badge1 = y("Off the beaten"); const footer = y("Reading has gone");
++  assert.ok(lastBody + 50 < titleFirst - 40); assert.ok(titleFirst < author); assert.ok(author + 20 < badge1 - 20); assert.ok(badge1 + 80 < footer);
++  const ys = calls.map((c) => c.y); assert.equal(new Set(ys).size, ys.length);
++});
++await test("a very long title and a missing badge still fit", () => {
++  const { ctx, calls } = fakeCtx();
++  const used = drawCard(ctx, { text: "Short.", title: "A Very Long Title ".repeat(12), author: "Someone", host: "h" });
++  assert.ok(used.title.length <= 2); assert.ok(calls.every((c) => c.y < CARD.height));
++});
++await test("sharing uses the device share sheet when it can and downloads otherwise; cancelling is respected", async () => {
++  const blob = new Blob(["png"], { type: "image/png" }); const shared = [];
++  const nav = { canShare: () => true, share: async (d) => { shared.push(d); } };
++  assert.equal(await shareOrDownload(blob, { title: "T", url: "https://x" }, nav, {}), "shared"); assert.equal(shared[0].files[0].type, "image/png");
++  assert.equal(await shareOrDownload(blob, { title: "T", url: "https://x" }, { canShare: () => true, share: async () => { const e = new Error("x"); e.name = "AbortError"; throw e; } }, {}), "cancelled");
++  let clicked = 0; const doc = { createElement: () => ({ click: () => clicked++, remove() {} }), body: { append() {} } };
++  globalThis.URL.createObjectURL = () => "blob:x"; globalThis.URL.revokeObjectURL = () => {};
++  assert.equal(await shareOrDownload(blob, { title: "T", url: "https://x" }, {}, doc), "downloaded"); assert.equal(clicked, 1);
++});
++console.log(`\n${passed} passed, ${failed} failed`);
++process.exit(failed ? 1 : 0);
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/tests/test_core.py final/tests/test_core.py
+--- stage2b/tests/test_core.py	2026-11-14 10:31:35.133751877 +0000
++++ final/tests/test_core.py	2026-11-14 10:31:35.172647238 +0000
+@@ -738,6 +738,62 @@
+         self.assertEqual(rt.universe.count("en"), 30)
+ 
+ 
++TOP_PAGE = """<html><body>
++<h2>Top 100 EBooks yesterday</h2><ol>{day}</ol>
++<h2>Top 100 Authors yesterday</h2><ol><li><a href="/ebooks/author/53">An author</a></li></ol>
++<h2>Top 100 EBooks last 7 days</h2><ol>{week}</ol>
++<h2>Top 100 EBooks last 30 days</h2><ol>{month}</ol>
++<h2>Top 100 Authors last 30 days</h2><ol><li><a href="/ebooks/author/9">Another</a></li></ol></body></html>"""
++
++
++def top_page(month_ids, week_ids=(), day_ids=()):
++    li = lambda ids: "".join(f'<li><a href="/ebooks/{i}">Book {i} by Someone (1234)</a></li>' for i in ids)
++    return TOP_PAGE.format(day=li(day_ids), week=li(week_ids), month=li(month_ids))
++
++
++class PopularityTests(OceanBase):
++    def test_parser_reads_the_lists_in_order_and_ignores_authors(self):
++        import popularity
++        lists = popularity.parse_top_page(top_page(range(2000, 2100), range(3000, 3100), range(4000, 4100)))
++        self.assertEqual(lists["month"][2000], 1); self.assertEqual(lists["month"][2099], 100); self.assertEqual(set(lists), {"month", "week", "day"})
++
++    def test_a_page_that_changed_shape_is_not_trusted(self):
++        import popularity
++        self.assertEqual(popularity.parse_top_page("<html><h2>Something else</h2></html>"), {})
++        self.assertEqual(popularity.parse_top_page(top_page(range(2000, 2005))), {})            # too short to be the real top 100
++
++    def test_badge_tiers_are_honest_and_absent_without_data(self):
++        import popularity
++        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
++        self.assertIsNone(pop.payload("en", 1000))                                              # no data: no badge, no invented number
++        opener = lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html")
++        self.assertTrue(pop.refresh(opener=opener))
++        self.assertEqual(pop.payload("en", 2000)["tier"], "jackpot"); self.assertEqual(pop.payload("en", 2050)["tier"], "lucky")
++        gem = pop.payload("en", 99999); self.assertEqual(gem["tier"], "hidden-gem"); self.assertIsNone(gem["rank"])
++        self.assertIn("popularity, not literary quality", gem["note"])
++
++    def test_a_failed_refresh_keeps_the_last_good_data_and_says_why(self):
++        import popularity, urllib.error
++        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
++        pop.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html"))
++        def down(req, timeout): raise urllib.error.URLError("offline")
++        self.assertFalse(pop.refresh(opener=down)); self.assertIn("offline", pop.last_error)
++        self.assertEqual(pop.payload("en", 2000)["tier"], "jackpot")
++        self.assertFalse(pop.refresh(opener=lambda req, timeout: SourceTests.Resp(b"<html>nope</html>", "text/html")))   # changed page: keep old data
++
++    def test_reveal_shows_a_fresh_badge_and_the_event_for_sharing_is_accepted(self):
++        record = self.rt.universe.random_candidates("en", 1, random.Random(2))[0]
++        self.rt.worker.enqueue(prep.COLD, "en", record, 0); self.rt.worker.run_pending()
++        ids = [record["gutenberg_id"]] + list(range(5000, 5099))
++        self.rt.popularity.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(ids).encode(), "text/html"))
++        handle = self.rt.catalogues["en"].book_token(record["id"])
++        book = self.post("/api/book/reveal", book_token=handle)["book"]
++        self.assertEqual(book["popularity"]["tier"], "jackpot")
++        self.assertTrue(self.post("/api/event", event="share_created", book_token=handle)["ok"])
++        self.rt.popularity.path.write_text(json.dumps({"updated": 0}))                           # data vanished: the badge goes with it
++        self.assertIsNone(self.post("/api/book/reveal", book_token=handle)["book"]["popularity"])
++
++
+ class SecretKeyTests(unittest.TestCase):
+     def test_workers_starting_at_the_same_moment_get_the_same_key(self):
+         import threading, runtime
+@@ -825,7 +881,7 @@
+ class FrontEndTests(unittest.TestCase):
+     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
+     def test_javascript_logic(self):
+-        for script in ("front_tests.mjs", "storage_tests.mjs"):
++        for script in ("front_tests.mjs", "storage_tests.mjs", "share_tests.mjs"):
+             out = subprocess.run(["node", f"tests/js/{script}"], capture_output=True, text=True, timeout=120)
+             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+ 
+diff -ruN '--exclude=__pycache__' '--exclude=instance' '--exclude=node_modules' stage2b/tools/sync_popularity.py final/tools/sync_popularity.py
+--- stage2b/tools/sync_popularity.py	1970-01-01 00:00:00.000000000 +0000
++++ final/tools/sync_popularity.py	2026-11-14 10:31:36.891593682 +0000
+@@ -0,0 +1,28 @@
++"""Fetch Project Gutenberg's most-read lists and show what was found, so you can check the badge data is real.
++
++    python tools/sync_popularity.py
++"""
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from app import create_app  # noqa: E402
++
++
++def main():
++    rt = create_app({"EMBEDDED_WORKER": False, "TESTING": True}).runtime
++    if not rt.popularity.refresh():
++        print("Could not read the lists:", rt.popularity.last_error)
++        print("No badge will be shown until this works. (The page layout may have changed; send me the page's HTML headings.)")
++        return 1
++    data = rt.popularity._data
++    for key in ("month", "week", "day"):
++        ranks = data.get(key) or {}
++        print(f"{key}: {len(ranks)} books; first three ids: {list(ranks)[:3]}")
++    print(f"Saved to {rt.popularity.path}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
