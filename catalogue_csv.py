@@ -7,7 +7,9 @@ the app's wording and REAL numbers (bytes downloaded, bytes of the file read), n
 """
 import csv
 import gzip
+import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,22 +24,41 @@ LANGUAGES = ("en", "fr", "zh")
 USER_AGENT = source.USER_AGENT
 
 
+class NotModified(Exception):
+    """The server says the catalogue has not changed since the copy we already have."""
+
+
+def _validators_path(dest):
+    return Path(dest).with_name(Path(dest).name + ".validators.json")
+
+
 def _say(progress, message, percent=None):
     if progress:
         progress(message, percent)
 
 
-def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=60):
+def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.urlopen, timeout=10, deadline=180, conditional=True):
     """Download the catalogue to `dest` (atomically). Tries the alternate server if the main one fails."""
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + f".{os.getpid()}.download")
     last = None
     for index, (name, url) in enumerate(urls):
+        started = time.monotonic()
         try:
             _say(progress, f"Connecting to {name} catalogue\u2026" if index == 0 else
                  f"The main catalogue server is unavailable; trying {name}\u2026", 2)
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"})
+            headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
+            if dest.exists() and conditional:                  # ask "has it changed?" first: usually it has not, and then nothing is downloaded
+                try:
+                    known = json.loads(_validators_path(dest).read_text(encoding="utf-8"))
+                    if known.get("etag"):
+                        headers["If-None-Match"] = known["etag"]
+                    if known.get("last_modified"):
+                        headers["If-Modified-Since"] = known["last_modified"]
+                except (OSError, ValueError):
+                    pass
+            req = urllib.request.Request(url, headers=headers)
             with opener(req, timeout=timeout) as response:
                 try:
                     size = int(response.headers.get("Content-Length") or 0)
@@ -54,9 +75,23 @@ def download(dest, progress=None, *, urls=CATALOG_URLS, opener=urllib.request.ur
                         if size:
                             pct = int(got * 100 / size)
                             _say(progress, f"Downloading catalogue from {name}\u2026 {pct}%", 5 + int(pct * 0.5))
+                        else:                                   # the server did not say how big: show bytes, never a stuck number
+                            _say(progress, f"Downloading catalogue from {name}\u2026 {got / 1e6:.1f} MB", None)
+                        if time.monotonic() - started > deadline:
+                            raise TimeoutError(f"{name} was too slow (over {deadline} s)")
             gzip.open(tmp, "rb").read(64)                      # must really be gzip data
             os.replace(tmp, dest)
+            try:
+                _validators_path(dest).write_text(json.dumps({"etag": response.headers.get("ETag"),
+                                                              "last_modified": response.headers.get("Last-Modified")}), encoding="utf-8")
+            except OSError:
+                pass
             return dest
+        except urllib.error.HTTPError as exc:
+            if exc.code == 304 and dest.exists():
+                raise NotModified() from exc
+            last = exc
+            tmp.unlink(missing_ok=True)
         except (urllib.error.URLError, OSError, EOFError, TimeoutError, gzip.BadGzipFile) as exc:
             last = exc
             tmp.unlink(missing_ok=True)

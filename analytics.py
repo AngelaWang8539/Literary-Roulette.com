@@ -19,7 +19,7 @@ _writer = None  # (database path, queue, thread) once start_writer() has been ca
 EVENTS = (
     "passage_displayed", "another_passage_requested", "book_revealed", "book_hidden",
     "another_book_requested", "read_link_clicked", "borrow_link_clicked", "buy_link_clicked",
-    "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure",
+    "book_saved", "awareness_known", "awareness_unknown", "awareness_unsure", "share_created",
 )
 
 

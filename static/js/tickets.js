@@ -1,5 +1,4 @@
 // The visitor's small pouch of sealed passage tickets, kept full in the background.
-//
 // * Every draw is a uniform pick from the whole catalogue (server side). Books already in the shared "lake"
 //   come back at once; fresh picks that still have to be prepared come back as `pending` handles.
 // * Pending picks are polled with real stages and percentages. The first one that is ready becomes the
@@ -10,7 +9,7 @@
 const sleepFor = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxSeenBooks = 120, maxSeenPassages = 200,
-                                    pollMs = 700, sleep = sleepFor }) {
+                                    pollMs = 700, sleep = sleepFor, stallMs = 25000, maxWaitMs = 70000 }) {
   let queue = [], seenBooks = [], current = null, refilling = null, companion = null, bg = null;
   const pending = new Map();                       // handle -> {startedAt, drawNumber, total, percent, stage, message}
   const seenPassages = new Map();
@@ -42,7 +41,11 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
       if (!p) continue;
       if (r.state === "ready" && r.ticket) { addTicket(r.ticket); pending.delete(r.handle); }
       else if (r.state === "failed") pending.delete(r.handle);
-      else Object.assign(p, { percent: r.percent ?? p.percent, stage: r.stage || p.stage, message: r.message || p.message });
+      else {
+        const next = { percent: r.percent === undefined ? p.percent : r.percent, stage: r.stage || p.stage, message: r.message || p.message, ahead: r.ahead || 0 };
+        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message) p.movedAt = Date.now();   // it moved: not stalled
+        Object.assign(p, next);
+      }
     }
   }
 
@@ -55,7 +58,7 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
         if (res.restarted) seenBooks = [];                          // the visitor has met every book: a fresh round
         for (const t of res.tickets || []) addTicket(t);
         for (const p of res.pending || []) {
-          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: Date.now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "" });
+          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: Date.now(), movedAt: Date.now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "", ahead: 0 });
         }
         watchInBackground();
       }
@@ -74,9 +77,11 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
 
     /** The next different-book ticket. Waits (with progress callbacks) only if the pouch ran dry. While the
      *  catalogue is still being opened (first run) it waits and reports the real progress through onOpening. */
-    async next({ onProgress, onOpening } = {}) {
+    async next({ onProgress, onOpening, onNotice } = {}) {
+      const began = Date.now();
       for (let guard = 0; guard < 600; guard++) {
         if (queue.length) { return { ok: true, ticket: queue.shift() }; }
+        if (Date.now() - began > maxWaitMs) return { ok: false, code: "slow", message: "Project Gutenberg is very slow right now. Please try another spin in a moment." };
         if (!pending.size) {
           const res = await refill();
           if (!res.ok) {
@@ -89,6 +94,9 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxS
         onProgress?.(summary(), info);
         await sleep(pollMs);
         await pollOnce();
+        for (const [handle, p] of [...pending]) {      // watchdog: a book that has not moved for a long time is replaced, never waited on forever
+          if (Date.now() - p.movedAt > stallMs) { pending.delete(handle); onNotice?.("Gutenberg is slow for this one, so the librarian is drawing another book."); }
+        }
       }
       return { ok: false, code: "preparing", message: "The librarian is taking longer than expected. Please try again shortly." };
     },

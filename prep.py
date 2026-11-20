@@ -24,6 +24,7 @@ import threading
 import time
 from pathlib import Path
 
+import jobstate
 import segment
 import source
 
@@ -49,6 +50,8 @@ class Settings:
         self.check_interval = float(kw.get("check_interval", 3.0))
         self.failed_keep = int(kw.get("failed_keep", 300))
         self.replenish = bool(kw.get("replenish", True))
+        self.breaker_threshold = int(kw.get("breaker_threshold", 6))   # consecutive temporary failures that pause fetching
+        self.breaker_seconds = float(kw.get("breaker_seconds", 120))
 
 
 def edition_key_for(book):
@@ -62,6 +65,7 @@ class Job:
         self.state, self.attempts, self.error = "queued", 0, None
         self.queued_at, self.not_before = time.time(), 0.0
         self.stage, self.percent = "queued", 6
+        self.detail, self.indeterminate, self.last_move = "", False, time.time()
 
 
 class PrepWorker:
@@ -77,7 +81,10 @@ class PrepWorker:
         self.wave = {lang: self.settings.first_wave for lang in catalogues}
         self._sleep, self._clock = sleep, clock
         self.rng = rng or random.Random()
-        self.gate = source.RateGate(self.settings.min_interval)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.store = jobstate.JobStore(self.state_dir / "jobs.sqlite", clock=clock)     # progress every process can see
+        self.gate = source.SharedRateGate(self.state_dir / ".gate", self.settings.min_interval)   # courtesy gap, machine-wide
+        self._fail_streak, self._breaker_until = 0, 0.0
         self._downloads = threading.BoundedSemaphore(max(1, self.settings.source_concurrency))
         self._cv = threading.Condition()
         self._heap, self._delayed, self._seq = [], [], 0
@@ -146,6 +153,7 @@ class PrepWorker:
             self._jobs[key] = job
             self._push(job)
             self._cv.notify()
+        self._publish(job)
         return True
 
     def _push(self, job):
@@ -235,18 +243,44 @@ class PrepWorker:
             if job:
                 self._process(job)
 
+    def breaker_open(self):
+        return self._clock() < self._breaker_until
+
+    def _note_result(self, ok, transient=False):
+        """Circuit breaker: a run of temporary failures (server down, blocked) pauses fetching instead of hammering Gutenberg."""
+        if ok:
+            self._fail_streak = 0
+        elif transient:
+            self._fail_streak += 1
+            if self._fail_streak >= self.settings.breaker_threshold:
+                self._breaker_until = self._clock() + self.settings.breaker_seconds
+                self._fail_streak = 0
+                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs", self.settings.breaker_seconds)
+
     def _process(self, job):
-        release = self._claim(job.key)
         try:
+            if job.kind == COLD and self.breaker_open():       # paused: do not start a download, look again when it closes
+                self._finish(job, requeue_after=max(1.0, self._breaker_until - self._clock()), count_attempt=False)
+                return
+            release = self._claim(job.key)
             if release is None:                 # another process is preparing this edition right now
-                self._finish(job, requeue_after=20.0, count_attempt=False)
+                self._finish(job, requeue_after=3.0, count_attempt=False)
                 return
             try:
+                self.shelf.refresh_if_changed()
+                if job.kind == COLD and self.shelf.has(job.language, job.book["id"]):
+                    job.stage, job.percent, job.detail, job.indeterminate = "ready", 100, "", False    # someone else already prepared it
+                    self._finish(job, done=True)
+                    return
                 job.attempts += 1
+                self._publish(job, "running")
                 self._prepare(job)
+                self._note_result(True)
                 self._finish(job, done=True)
             except source.SourceError as exc:
                 job.error = str(exc)
+                if job.kind == COLD:
+                    self._note_result(False, transient=not exc.permanent)
                 self._finish(job, permanent=exc.permanent)
             except Exception as exc:            # a bug or odd text: record it, never kill the worker
                 job.error = f"{type(exc).__name__}: {exc}"
@@ -264,30 +298,47 @@ class PrepWorker:
                 self._jobs.pop(job.key, None)
                 self._failed.pop(job.key, None)
                 self.completed += 1
-                return
-            if requeue_after is not None:
+                outcome = ("done", None)
+            elif requeue_after is not None:
                 job.state, job.not_before = "queued", self._clock() + requeue_after
                 if not count_attempt:
                     job.attempts = max(0, job.attempts - 1)
                 self._push(job)
                 self._cv.notify()
-                return
-            if permanent or job.attempts >= self.settings.max_attempts:
+                outcome = ("queued", None)
+            elif permanent or job.attempts >= self.settings.max_attempts:
                 self._jobs.pop(job.key, None)
                 self._failed[job.key] = {"error": job.error, "permanent": True, "attempts": job.attempts,
                                          "at": self._clock(), "book": job.book["id"], "language": job.language}
                 self._save_failed()
                 log.warning("Giving up on %s: %s", job.key, job.error)
-                return
-            delay = min(self.settings.backoff_cap, self.settings.backoff_base * (2 ** (job.attempts - 1)))
-            delay *= 0.5 + self.rng.random()                     # jitter
-            job.state, job.not_before = "queued", self._clock() + delay
-            self._push(job)
-            self._cv.notify()
-            log.info("Will retry %s in %.0fs: %s", job.key, delay, job.error)
+                outcome = ("failed", job.error)
+            else:
+                delay = min(self.settings.backoff_cap, self.settings.backoff_base * (2 ** (job.attempts - 1)))
+                delay *= 0.5 + self.rng.random()                 # jitter
+                job.state, job.not_before = "queued", self._clock() + delay
+                self._push(job)
+                self._cv.notify()
+                log.info("Will retry %s in %.0fs: %s", job.key, delay, job.error)
+                outcome = ("queued", job.error)
+        self._publish(job, outcome[0], outcome[1])
 
-    def _set_stage(self, job, stage, percent):
+    def _publish(self, job, state=None, error=None):
+        """Write this job's visible state to the shared store (so any process can answer a visitor's poll)."""
+        try:
+            self.store.upsert(job.key, job.language, self.catalogues[job.language].book_token(job.book["id"]), job.kind,
+                              state or job.state, job.stage, None if job.indeterminate else job.percent, job.detail,
+                              error if error is not None else job.error, job.priority, job.queued_at, job.last_move)
+            job._published = time.monotonic()
+        except Exception:                      # progress is a nicety: never let it break preparing a book
+            log.exception("Could not write job state")
+
+    def _set_stage(self, job, stage, percent, detail="", indeterminate=False):
+        changed = (stage != job.stage) or (indeterminate != job.indeterminate)
         job.stage, job.percent = stage, max(job.percent, percent) if stage == job.stage else percent
+        job.detail, job.indeterminate, job.last_move = detail, indeterminate, time.time()
+        if changed or time.monotonic() - getattr(job, "_published", 0) > 0.25:
+            self._publish(job)
 
     def _prepare(self, job):
         language, book = job.language, job.book
@@ -304,7 +355,11 @@ class PrepWorker:
             with self._downloads:               # bounded concurrency toward the source
                 self.gate.wait()
                 if self._fetch_reports_progress:
-                    report = lambda fraction: self._set_stage(job, "fetching", 12 + int(48 * min(1.0, max(0.0, fraction))))
+                    def report(fraction, got=None):
+                        if fraction is None:        # the server gave no size: report bytes, not an invented percentage
+                            self._set_stage(job, "fetching", job.percent, f"{(got or 0) / 1e6:.1f} MB", True)
+                        else:
+                            self._set_stage(job, "fetching", 12 + int(48 * min(1.0, max(0.0, fraction))))
                     text = self._fetch(book, progress=report)
                 else:
                     text = self._fetch(book)
@@ -337,10 +392,16 @@ class PrepWorker:
         return min(self.settings.library_target, max(0, self.universe.count(language)))
 
     def estimated_wait(self):
-        """Seconds a newly queued visitor pick would wait: the cold jobs ahead of it, one download start per gap."""
-        with self._cv:
-            ahead = sum(1 for j in self._jobs.values() if j.kind == COLD and j.state in ("queued", "running"))
-        return ahead * self.settings.min_interval / max(1, 1)
+        """Seconds a newly queued visitor pick would wait: every process's cold jobs ahead of it (shared store), one download
+        start per gap. While the circuit breaker is open the wait is reported as long, so draws shed to prepared books."""
+        wait = self.store.pending_cold() * self.settings.min_interval
+        if self.breaker_open():
+            wait += (self._breaker_until - self._clock()) + self.settings.max_cold_wait + 1
+        return wait
+
+    def job_view(self, language, book_token):
+        """Progress of the newest job for this book token, from the shared store (any process can answer)."""
+        return self.store.view(language, book_token)
 
     def lake_deficit(self, language):
         return max(0, self.lake_target(language) - len(self.lake_ids(language)) - self.pending_cold(language))
@@ -383,6 +444,12 @@ class PrepWorker:
                     return None
         return None
 
+    def ahead_of(self, job):
+        """How many cold books are being fetched or waiting in front of this one."""
+        with self._cv:
+            return sum(1 for j in self._jobs.values() if j is not job and j.kind == COLD and (
+                j.state == "running" or (j.state == "queued" and (j.priority, j.queued_at) < (job.priority, job.queued_at))))
+
     def has_failed(self, language, book_token):
         cat = self.catalogues[language]
         with self._cv:
@@ -412,6 +479,7 @@ class PrepWorker:
 
     def maintenance(self):
         """Only if the library has grown past its target (plus one wave): retire the OLDEST books, by age alone."""
+        self.store.prune()
         for language, cat in self.catalogues.items():
             for victim in self.shelf.evict_cold(language, self.settings.library_target + self.settings.max_wave):
                 cat.unregister_external(victim)
@@ -434,7 +502,7 @@ class PrepWorker:
                 "running": bool(self._threads), "busy": self._busy, "completed": self.completed,
                 "queued": sum(1 for j in jobs if j.state == "queued"),
                 "active": sum(1 for j in jobs if j.state == "running"),
-                "failed": len(self._failed),
+                "failed": len(self._failed), "breaker_open": self.breaker_open(),
                 "languages": {
                     lang: {"lake": len(self.lake_ids(lang)), "target": self.lake_target(lang),
                            "pending": sum(1 for j in jobs if j.language == lang),

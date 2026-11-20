@@ -16,6 +16,8 @@ START_RE = re.compile(r"\*{3,}\s*START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^
 END_RE = re.compile(r"\*{3,}\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK", re.I)
 MIN_CHARS = {"zh": 300}
 DEFAULT_MIN_CHARS = 500
+CONNECT_TIMEOUT = 8          # seconds to connect / to wait for any silent server before trying the next address
+TOTAL_DEADLINE = 45         # one download attempt never runs longer than this, however slowly it trickles
 USER_AGENT = "LiteraryRoulette/0.6 (background text preparation; contact via the site's About page)"
 
 
@@ -46,6 +48,38 @@ class RateGate:
             self._next = max(now, self._next) + self.min_interval
         if delay:
             self._sleep(delay)
+
+
+class SharedRateGate:
+    """A RateGate that holds across processes on one machine (several Gunicorn workers + worker.py): a lock file keeps
+    the time of the last download start, so the courtesy gap toward Gutenberg is global, not per process."""
+
+    def __init__(self, path, min_interval=2.0, sleep=time.sleep):
+        self.path, self.min_interval, self._sleep = path, float(min_interval), sleep
+        self._fallback = RateGate(min_interval, sleep=sleep)
+        try:
+            import fcntl
+            self._fcntl = fcntl
+        except ImportError:                       # e.g. Windows: fall back to a per-process gate
+            self._fcntl = None
+
+    def wait(self):
+        if not self._fcntl or self.min_interval <= 0:
+            return self._fallback.wait()
+        with open(self.path, "a+") as handle:
+            self._fcntl.flock(handle, self._fcntl.LOCK_EX)         # one download start at a time, machine-wide
+            try:
+                handle.seek(0)
+                try:
+                    last = float(handle.read().strip() or 0)
+                except ValueError:
+                    last = 0.0
+                delay = last + self.min_interval - time.time()
+                if delay > 0:
+                    self._sleep(delay)
+                handle.seek(0); handle.truncate(); handle.write(repr(time.time())); handle.flush()
+            finally:
+                self._fcntl.flock(handle, self._fcntl.LOCK_UN)
 
 
 def trusted_url(value):
@@ -96,8 +130,12 @@ def clean_for_language(text, language):
     return cleaned if cleaned and len(cleaned.strip()) >= DEFAULT_MIN_CHARS else clean_gutenberg_text(text)
 
 
-def download(url, gid, *, timeout=60, opener=urllib.request.urlopen, progress=None):
-    """Fetch the raw bytes once. Raises Transient/PermanentSourceError."""
+def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, opener=urllib.request.urlopen, progress=None):
+    """Fetch the raw bytes once. Raises Transient/PermanentSourceError.
+
+    `progress(fraction, got_bytes)`: fraction is None when the server did not say how big the file is. A silent server
+    is given `timeout` seconds, and the whole attempt at most `deadline` seconds, so a stall can never hang a reader."""
+    started = time.monotonic()
     if not trusted_url(url):
         raise PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity", "Connection": "close"})
@@ -115,8 +153,10 @@ def download(url, gid, *, timeout=60, opener=urllib.request.urlopen, progress=No
                     break
                 chunks.append(chunk)
                 got += len(chunk)
-                if progress and size:
-                    progress(got / size)
+                if progress:
+                    progress(got / size if size else None, got)
+                if time.monotonic() - started > deadline:
+                    raise TransientSourceError(f"eBook #{gid}: the server was too slow (over {deadline} s)")
             raw = b"".join(chunks)
     except urllib.error.HTTPError as exc:
         if exc.code in (408, 425, 429, 500, 502, 503, 504):
@@ -137,15 +177,17 @@ def fetch_clean_text(book, *, downloader=download, progress=None):
     "not found" is the book given up on for good. A temporary problem (busy server) is raised so the worker retries later."""
     language, gid = book["language"], book["gutenberg_id"]
     urls = [u for u in (book.get("text_urls") or [book.get("text_url")]) if u]
-    raw, last = None, None
-    for url in urls:
+    raw, errors = None, []
+    for url in urls:                     # a slow, silent or missing address just means: try the next one
         try:
             raw = downloader(url, gid, progress=progress) if progress else downloader(url, gid)
             break
-        except PermanentSourceError as exc:
-            last = exc
+        except SourceError as exc:
+            errors.append(exc)
     if raw is None:
-        raise last or PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
+        if errors and all(e.permanent for e in errors):
+            raise errors[-1]
+        raise next((e for e in reversed(errors) if not e.permanent), None) or PermanentSourceError(f"eBook #{gid} has no trusted https plain-text URL.")
     text = clean_for_language(decode_bytes(raw), language)
     if len(text.strip()) < MIN_CHARS.get(language, DEFAULT_MIN_CHARS):
         raise PermanentSourceError(f"eBook #{gid} did not yield enough readable text.")

@@ -6,6 +6,7 @@ import { splitPassages } from "./chunker.js";
 import * as roulette from "./roulette.js";
 import * as Librarian from "./librarian.js";
 import { createTicketPouch } from "./tickets.js";
+import {cardBlob, shareOrDownload, describeShare, shareLink} from "./sharecard.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -119,11 +120,15 @@ async function drawWhenReady(op) {
       if (!p) return;
       op.show();
       const mode = STAGE_MODE[p.stage] || "load";
-      const percent = p.stage === "queued" ? 25 : Math.min(95, 25 + Math.round(p.percent * 0.7));
-      const text = p.stage === "queued" ? `Drawing number ${fmt(p.drawNumber)} of ${fmt(p.total)}` : (p.message || "Fetching this edition");
-      op.update(text, { mode, percent });
+      const indeterminate = p.percent === null || p.percent === undefined;
+      const percent = indeterminate ? undefined : (p.stage === "queued" ? 25 : Math.min(95, 25 + Math.round(p.percent * 0.7)));
+      const text = p.stage === "queued"
+        ? (p.ahead > 0 ? `Waiting for a free librarian \u00b7 ${p.ahead} ahead` : `Drawing number ${fmt(p.drawNumber)} of ${fmt(p.total)}`)
+        : (p.message || "Fetching this edition");
+      op.update(text, { mode, percent, indeterminate });
       announced = true;
     },
+    onNotice: (text) => setStatus(text, "note"),
   });
   if (res.ok && pouch.info.mode === "starter") setTimeout(() => setStatus("The catalogue could not be opened, so this is a book from the small starter shelf. The librarian keeps trying.", "note"), 0);
   return res;
@@ -174,6 +179,14 @@ function showPassage(p, { record = true } = {}) {
 }
 
 // ---------- book details ----------
+const newMemo = new Map();           // book -> was it new to this reader? Asked once, so hide + reveal again keeps the answer
+function markNewToYou(b) {
+  const key = S.source + ":" + S.bookKey;
+  if (!newMemo.has(key)) newMemo.set(key, ready.then(() => lib.wasRevealed(S.source, S.bookKey)).then((seen) => !seen).catch(() => false));
+  newMemo.get(key).then((isNew) => {
+    if (isNew && S.book === b && !ui.popularity.hidden && !ui.popularity.querySelector(".popularity-new")) ui.popularity.prepend(el("span", "popularity-new", "New to you"));
+  });
+}
 function renderBook(b) {
   if (!ui.popularity) { ui.popularity = el("div", "popularity-badge"); ui.author.after(ui.popularity); } // self-heal an older template
   ui.title.textContent = b.title; ui.author.textContent = "by " + b.author; ui.desc.textContent = b.description || "";
@@ -187,6 +200,7 @@ function renderBook(b) {
     ui.popularity.append(el("span", "popularity-label", b.popularity.label));
     if (b.popularity.detail) ui.popularity.append(el("small", "popularity-detail", b.popularity.detail));
     ui.popularity.hidden = false;
+    markNewToYou(b);
     ui.popularity.title = b.popularity.note || "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
     ui.popularity.setAttribute("aria-label", `${b.popularity.label}. ${b.popularity.detail || ""}`.trim());
   } else {
@@ -237,11 +251,38 @@ function afterReveal(book) {
   openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
   ready.then(() => lib.markBookRevealed(S.source, S.bookKey, book)).catch(() => {});
   ui.awareness.hidden = S.source !== "catalogue";
+  const shareBtn = $("btn-share"); if (shareBtn) shareBtn.hidden = S.source !== "catalogue";
+  const copyBtn = $("btn-copy-link"); if (copyBtn) copyBtn.hidden = S.source !== "catalogue";
   setStatus("Book revealed. Your passage has not changed.");
   ui.details.focus({ preventScroll: true });
   ui.details.scrollIntoView({ block: "nearest", behavior: reduceMotion() ? "auto" : "smooth" });
 }
 
+// ---------- share the discovery: a picture made on this device ----------
+$("btn-share")?.addEventListener("click", async () => {
+  if (S.source !== "catalogue" || !S.book) return;
+  const note = $("share-note"), btn = $("btn-share");
+  btn.setAttribute("aria-disabled", "true");
+  try {
+    const pop = S.book.popularity, genres = (S.book.genres || []).slice(0, 2).join(" \u00b7 ");
+    const blob = await cardBlob({ text: ui.text.textContent, title: S.book.title, author: S.book.author,
+      badge: pop && pop.label ? { label: pop.short || pop.label, tier: pop.tier } : null,
+      meta: [S.book.publication, genres].filter(Boolean), source: S.book.source && S.book.source.location,
+      pill: S.book.is_demo ? "Sample card" : "" });
+         const how = await shareOrDownload(blob, { title: S.book.title, text: `${S.book.title} \u2014 found on Literary Roulette`, url: shareLink(ui.text.textContent) });
+    if (how !== "cancelled") logEvent("share_created");
+        note.textContent = describeShare(how);
+    note.hidden = !note.textContent;
+  } catch { note.textContent = "Sorry, the card could not be made on this device."; note.hidden = false; }
+  btn.removeAttribute("aria-disabled");
+});
+// ---------- copy the home page link (for X, WhatsApp, anywhere a picture and a link must travel separately) ----------
+$("btn-copy-link")?.addEventListener("click", async () => {
+  const note = $("share-note"), link = shareLink(ui.text.textContent);
+  try { await navigator.clipboard.writeText(link); note.textContent = "Link copied. Paste it next to the picture."; }
+  catch { note.textContent = "Copy this link: " + link; }
+  note.hidden = false;
+});
 // ---------- uploaded books: the three actions, run locally ----------
 const upBook = (id) => S.up.books.find((b) => b.id === id);
 const seenSet = (id) => { if (!S.up.seenP.has(id)) S.up.seenP.set(id, new Set()); return S.up.seenP.get(id); };
@@ -480,3 +521,4 @@ addEventListener("hashchange", route);
 route();
 oceanReady = loadOcean();
 startCatalogue();
+window.__lrReady = true;

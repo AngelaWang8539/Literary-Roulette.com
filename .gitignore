@@ -35,3 +35,11 @@ instance/
 __pycache__/
 .idea/
 node_modules/
+.venv/
+instance/
+__pycache__/
+.idea/
+.DS_Store
+*.db
+.env
+*.zip
