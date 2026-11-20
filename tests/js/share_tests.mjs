@@ -1,13 +1,14 @@
 // Share card tests. Run: node tests/js/share_tests.mjs
 import assert from "node:assert/strict";
-import { excerpt, wrapLines, drawCard, shareOrDownload, CARD } from "../../static/js/sharecard.js";
+import { excerpt, wrapLines, drawCard, shareOrDownload, LAYOUT } from "../../static/js/sharecard.js";
 let passed = 0, failed = 0;
 async function test(name, fn) { try { await fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e)); } }
 const measure = (t) => t.length * 20;
 
 function fakeCtx() {
   const calls = []; const ctx = { font: "", fillStyle: "", strokeStyle: "", lineWidth: 0, textBaseline: "", textAlign: "",
-    fillRect() {}, strokeRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {}, fill() {}, stroke() {}, save() {}, restore() {}, quadraticCurveTo() {},
+    lineJoin: "",
     measureText: (t) => ({ width: measure(t) }), fillText: (t, x, y) => calls.push({ t, x, y }) };
   return { ctx, calls };
 }
@@ -26,29 +27,37 @@ await test("lines never exceed the width, a giant word is split, and too many li
   const cut = wrapLines(measure, "word ".repeat(80).trim(), 200, 3); assert.equal(cut.length, 3); assert.ok(cut[2].endsWith("\u2026"));
   const zh = wrapLines(measure, "\u4f60\u597d\u4e16\u754c".repeat(20), 200); assert.ok(zh.every((l) => measure(l) <= 200));
 });
-await test("the card holds the passage, title, author, badge and footer, all inside the picture", () => {
-  const { ctx, calls } = fakeCtx();
-  const used = drawCard(ctx, { text: "A passage from an unnamed book. ".repeat(40), title: "The Lost World", author: "Arthur Conan Doyle", badge: "Jackpot! One of Gutenberg's 10 most-read books this month", host: "127.0.0.1:5000" });
+const FULL = { text: "A passage from an unnamed book. ".repeat(40), title: "The Lost World", author: "Arthur Conan Doyle",
+  badge: { label: "Jackpot read", tier: "jackpot" }, meta: ["First published 1912.", "Adventure \u00b7 Science Fiction"], source: "Passage 16", pill: "Sample card" };
+const inside = (calls, L) => calls.every((c) => c.x >= 0 && c.x <= L.W && c.y > 0 && c.y < L.H);
+
+await test("both layouts hold passage, title, author, badge, meta and the button, all inside the picture", () => {
+  for (const format of ["landscape", "mobile"]) {
+    const { ctx, calls } = fakeCtx(), used = drawCard(ctx, FULL, format), texts = calls.map((c) => c.t), L = LAYOUT[format];
+    for (const want of ["The Lost World", "Arthur Conan Doyle", "Jackpot read", "First published 1912.", "Passage 16", "Sample card", "You found", "Spin your own book"]) assert.ok(texts.includes(want), `${format}: ${want}`);
+    assert.equal(used.format, format); assert.ok(used.body.length >= 1);
+    assert.ok(inside(calls, L), `${format}: everything stays inside the picture`);
+  }
+});
+await test("the passage shrinks to fit and stays above its footer; a very long title shrinks too", () => {
+  for (const format of ["landscape", "mobile"]) {
+    const L = LAYOUT[format], { ctx, calls } = fakeCtx(), long = { ...FULL, text: "word ".repeat(400), title: "A Very Long Title ".repeat(12) };
+    const used = drawCard(ctx, long, format);
+    const lastBody = calls.filter((c) => used.body.includes(c.t)).at(-1).y;
+    assert.ok(lastBody < L.text.bottom + 1, `${format}: passage ends above ${L.text.bottom}`);
+    assert.ok(used.title.length <= 5); assert.ok(inside(calls, L));
+  }
+});
+await test("a missing badge, pill, source and meta still draw a complete card; the phone card is taller than wide", () => {
+  const { ctx, calls } = fakeCtx(), used = drawCard(ctx, { text: "Short.", title: "T", author: "A" }, "mobile");
   const texts = calls.map((c) => c.t);
-  assert.ok(texts.includes("The Lost World")); assert.ok(texts.includes("by Arthur Conan Doyle")); assert.ok(texts.some((t) => t.startsWith("Jackpot")));
-  assert.ok(texts.includes("Reading has gone completely random.")); assert.ok(texts.includes("127.0.0.1:5000"));
-  assert.ok(used.body.length >= 1 && used.body.length <= CARD.maxExcerptLines);
-  assert.ok(calls.every((c) => c.x >= 0 && c.x + measure(c.t) <= CARD.width && c.y > 0 && c.y < CARD.height));
+  assert.ok(texts.includes("Short.") && texts.includes("Spin your own book")); assert.ok(!texts.includes("Sample card")); assert.equal(used.format, "mobile");
+  assert.ok(LAYOUT.mobile.H > LAYOUT.mobile.W && LAYOUT.landscape.W > LAYOUT.landscape.H);
 });
-await test("nothing overlaps: passage, rule, title, author, badge and footer stack in order even with a long title and badge", () => {
-  const { ctx, calls } = fakeCtx();
-  const badge = "Off the beaten shelf: not among Gutenberg's most-read books this month";
-  const used = drawCard(ctx, { text: "word ".repeat(120), title: "Freedom's Battle: Being a Comprehensive Collection of Writings and Speeches", author: "Gandhi, Mahatma", badge, host: "h" });
-  const y = (t) => calls.find((c) => c.t === t || c.t.startsWith(t)).y;
-  const lastBody = calls.filter((c) => used.body.includes(c.t)).at(-1).y;
-  const titleFirst = y(used.title[0]); const author = y("by Gandhi"); const badge1 = y("Off the beaten"); const footer = y("Reading has gone");
-  assert.ok(lastBody + 50 < titleFirst - 40); assert.ok(titleFirst < author); assert.ok(author + 20 < badge1 - 20); assert.ok(badge1 + 80 < footer);
-  const ys = calls.map((c) => c.y); assert.equal(new Set(ys).size, ys.length);
-});
-await test("a very long title and a missing badge still fit", () => {
-  const { ctx, calls } = fakeCtx();
-  const used = drawCard(ctx, { text: "Short.", title: "A Very Long Title ".repeat(12), author: "Someone", host: "h" });
-  assert.ok(used.title.length <= 2); assert.ok(calls.every((c) => c.y < CARD.height));
+await test("every badge tier has a look; an unknown tier falls back instead of failing", () => {
+  for (const tier of ["jackpot", "lucky", "discovery", "hidden-gem", "something-new"]) {
+    const { ctx, calls } = fakeCtx(); drawCard(ctx, { ...FULL, badge: { label: "L-" + tier, tier } }); assert.ok(calls.some((c) => c.t === "L-" + tier));
+  }
 });
 await test("sharing uses the device share sheet when it can and downloads otherwise; cancelling is respected", async () => {
   const blob = new Blob(["png"], { type: "image/png" }); const shared = [];

@@ -1,5 +1,4 @@
 // The visitor's small pouch of sealed passage tickets, kept full in the background.
-//
 // * Every draw is a uniform pick from the whole catalogue (server side). Books already in the shared "lake"
 //   come back at once; fresh picks that still have to be prepared come back as `pending` handles.
 // * Pending picks are polled with real stages and percentages. The first one that is ready becomes the

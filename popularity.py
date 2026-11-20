@@ -1,7 +1,10 @@
 """Popularity for the reveal reward ("Jackpot!" ... "Off the beaten shelf"), from Project Gutenberg's own public most-read lists.
 
-Only the top-100 lists are public, so the badge is honest about what it knows:
-  top 10 this month  -> jackpot        top 100 this month -> popular right now        otherwise -> off the beaten shelf
+Two honest sources, used in this order:
+  1. Gutenberg's public top-100 list for the month: top 10 -> jackpot, rest of the top 100 -> lucky.
+  2. The catalogue's own download percentile for every other book (`deep`, from universe.py): top 1% jackpot, top 10% lucky,
+     bottom 10% hidden gem, the middle 80% discovery. Without it a book outside the top 100 gets a neutral "off the shelf" line.
+Each tier has a few wordings; the book's id picks one, so a book always wears the same line but a run of spins does not repeat it.
 Refreshed about once a day. If the page cannot be fetched or no longer looks as expected, the last good data is kept; with no
 data at all there is simply no badge. A badge never invents a number. Pluggable: any other source only has to produce
 {"month": {gutenberg_id: rank}} (see parse_top_page) to replace this one.
@@ -20,6 +23,27 @@ TOP_URL = "https://www.gutenberg.org/browse/scores/top"
 LISTS = {"month": "last 30 days", "week": "last 7 days", "day": "yesterday"}
 MIN_ENTRIES = 20                    # a list shorter than this means the page changed shape: do not trust it
 NOTE = "From Project Gutenberg's public most-read lists for the last 30 days. This is popularity, not literary quality."
+
+# (panel line, short card line). The panel line is translated by static/js/i18n.js; the card line is drawn in English.
+LINES = {
+    "jackpot": [("Jackpot! A Gutenberg favourite right now", "Jackpot read"),
+                ("Jackpot! Readers are flocking to this one", "Jackpot read")],
+    "lucky": [("Lucky find! A reader favourite this month", "Reader favourite"),
+              ("Lucky find! Plenty of readers are enjoying this one", "Reader favourite")],
+    "discovery": [("A fresh discovery: a book from the quieter shelves", "Fresh discovery"),
+                  ("A quiet find from the middle of the stacks", "Quiet find"),
+                  ("Nice find: a book away from the crowd", "Fresh discovery")],
+    "gem": [("Hidden gem alert! Among the least-downloaded 10%: would you like to explore?", "Hidden gem"),
+            ("Deep-shelf find! Few readers have opened this one lately", "Deep-shelf find"),
+            ("Rare draw! One of the quietest books in the library", "Rare draw")],
+    "offlist": [("Off the beaten shelf: outside Gutenberg's monthly top 100", "Off the beaten shelf"),
+                ("Away from the crowd: not in Gutenberg's monthly top 100", "Away from the crowd")],
+}
+
+
+def pick_line(kind, gid):
+    pool = LINES[kind]
+    return pool[int(gid) % len(pool)]
 
 
 def parse_top_page(html):
@@ -68,19 +92,26 @@ class Popularity:
         self._load()
         return bool(self._data.get("month"))
 
-    def payload(self, language, gid):
-        """The badge for one book, or None when there is nothing true to say."""
-        if not self.available():
-            return None
-        rank = self.rank(gid)
-        if rank is not None and rank <= 10:
-            tier, label = "jackpot", "Jackpot! One of Gutenberg's 10 most-read books this month"
-        elif rank is not None:
-            tier, label = "lucky", "Popular right now: in Gutenberg's top 100 this month"
+    def payload(self, language, gid, deep=None):
+        """The badge for one book, or None when there is nothing true to say. `deep` is the catalogue's percentile badge, if any."""
+        have_month = self.available()
+        rank = self.rank(gid) if have_month else None
+        if rank is not None:
+            tier = "jackpot" if rank <= 10 else "lucky"
+            kind, detail, note, url = tier, f"Ranked #{rank} in Gutenberg's monthly top 100", NOTE, TOP_URL
+        elif deep and deep.get("tier") in ("jackpot", "lucky", "discovery", "hidden-gem"):
+            tier = deep["tier"]
+            kind = "gem" if tier == "hidden-gem" else tier
+            rank, detail, note, url = deep.get("rank"), deep.get("detail") or "", deep.get("note") or NOTE, deep.get("source_url") or TOP_URL
+        elif have_month:
+            tier, kind, detail, note, url = "hidden-gem", "offlist", "", NOTE, TOP_URL
         else:
-            tier, label = "hidden-gem", "Off the beaten shelf: not among Gutenberg's most-read books this month"
-        return {"tier": tier, "label": label, "detail": f"Ranked #{rank} in Gutenberg's monthly top 100" if rank is not None else "",
-                "note": NOTE, "rank": rank, "source_url": TOP_URL, "snapshot_date": time.strftime("%Y-%m-%d", time.gmtime(self._data.get("updated", 0)))}
+            return None
+        label, short = pick_line(kind, gid)
+        stamp = self._data.get("updated") if have_month else None
+        snapshot = time.strftime("%Y-%m-%d", time.gmtime(stamp)) if stamp else (deep or {}).get("snapshot_date", "")
+        return {"tier": tier, "label": label, "short": short, "detail": detail, "note": note, "rank": rank,
+                "source_url": url, "snapshot_date": snapshot}
 
     def stale(self):
         self._load()

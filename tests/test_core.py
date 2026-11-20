@@ -772,6 +772,22 @@ class PopularityTests(OceanBase):
         gem = pop.payload("en", 99999); self.assertEqual(gem["tier"], "hidden-gem"); self.assertIsNone(gem["rank"])
         self.assertIn("popularity, not literary quality", gem["note"])
 
+    def test_the_long_tail_gets_varied_honest_lines_from_the_catalogue_percentile(self):
+        import popularity
+        pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")
+        deep = {"tier": "hidden-gem", "rank": 70000, "detail": "Rank #70,000 of 78,000 titles", "note": "popularity, not literary quality"}
+        self.assertIsNone(pop.payload("en", 1, deep=None))                                       # no data of any kind: no badge
+        gem = pop.payload("en", 1, deep=deep)                                                    # the percentile alone is enough for a badge
+        self.assertEqual((gem["tier"], gem["rank"], gem["detail"]), ("hidden-gem", 70000, deep["detail"]))
+        self.assertEqual(gem, pop.payload("en", 1, deep=deep))                                   # a book always wears the same line
+        labels = {pop.payload("en", gid, deep=deep)["label"] for gid in range(1, 20)}
+        self.assertGreaterEqual(len(labels), 3)                                                  # but a run of spins is not repeated text
+        for tier in ("jackpot", "lucky", "discovery"):
+            got = pop.payload("en", 7, deep={**deep, "tier": tier}); self.assertEqual(got["tier"], tier); self.assertTrue(got["short"]); self.assertLessEqual(len(got["short"]), 24)
+        pop.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html"))
+        self.assertEqual(pop.payload("en", 2003, deep=deep)["tier"], "jackpot")                  # the public monthly list outranks the percentile
+        self.assertEqual(pop.payload("en", 99999)["tier"], "hidden-gem"); self.assertIn("top 100", pop.payload("en", 99999)["label"])   # no percentile: no claim about the bottom 10%
+
     def test_a_failed_refresh_keeps_the_last_good_data_and_says_why(self):
         import popularity, urllib.error
         pop = popularity.Popularity(Path(self.tmp.name) / "pop.json")

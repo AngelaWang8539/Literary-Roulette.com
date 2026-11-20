@@ -322,7 +322,8 @@ def create_app(test_config=None):
         rt.shelf.note_interest(language, book["id"], "reveal")
         payload_ = cat.book_payload(book, index)
         if str(book.get("gutenberg_id") or "").isdigit():       # popularity is looked up fresh at reveal time, never stored stale
-            payload_["popularity"] = rt.popularity.payload(language, book["gutenberg_id"])
+            deep = rt.universe.popularity(language, int(book["gutenberg_id"])) if rt.universe.available else None
+            payload_["popularity"] = rt.popularity.payload(language, book["gutenberg_id"], deep=deep)
         return jsonify(ok=True, language=language, book=payload_)
 
     @app.post("/api/event")
@@ -360,6 +361,9 @@ def create_app(test_config=None):
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    import hardening
+    hardening.apply(app)
 
     return app
 
