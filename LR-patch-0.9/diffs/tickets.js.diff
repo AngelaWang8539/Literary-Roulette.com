@@ -1,0 +1,97 @@
+--- orig/tickets.js	2026-11-20 07:08:34.634503903 +0000
++++ patched/tickets.js	2026-11-20 11:12:43.234913952 +0000
+@@ -9,11 +9,12 @@
+ const sleepFor = (ms) => new Promise((r) => setTimeout(r, ms));
+ 
+ export function createTicketPouch({ api, language, batch = 3, lowWater = 1, maxSeenBooks = 120, maxSeenPassages = 200,
+-                                    pollMs = 700, sleep = sleepFor, stallMs = 25000, maxWaitMs = 70000 }) {
++                                    pollMs = 700, sleep = sleepFor, stallMs = 25000, maxWaitMs = 70000,
++                                    coldBudgetMs = 8000, graceMs = 5000, maxPendingMs = 120000, now = Date.now }) {
+   let queue = [], seenBooks = [], current = null, refilling = null, companion = null, bg = null;
+   const pending = new Map();                       // handle -> {startedAt, drawNumber, total, percent, stage, message}
+   const seenPassages = new Map();
+-  const info = { mode: "ocean", total: 0 };
++  const info = { mode: "ocean", total: 0, sourceState: "ok", notice: "" };
+ 
+   const rememberBook = (token) => { seenBooks = seenBooks.filter((t) => t !== token).concat(token).slice(-maxSeenBooks); };
+   const passageSet = (bookToken) => { if (!seenPassages.has(bookToken)) seenPassages.set(bookToken, new Set()); return seenPassages.get(bookToken); };
+@@ -29,7 +30,11 @@
+   function stopBackground() { if (bg) { clearInterval(bg); bg = null; } }
+   function watchInBackground() {
+     if (bg || !pending.size) return;
+-    bg = setInterval(async () => { await pollOnce().catch(() => {}); if (!pending.size) stopBackground(); }, 1500);
++    bg = setInterval(async () => {
++      for (const [h, p] of [...pending]) if (now() - p.startedAt > maxPendingMs) pending.delete(h);   // never poll forever for one book
++      await pollOnce().catch(() => {});
++      if (!pending.size) stopBackground();
++    }, 1500);
+   }
+ 
+   async function pollOnce() {
+@@ -43,22 +48,26 @@
+       else if (r.state === "failed") pending.delete(r.handle);
+       else {
+         const next = { percent: r.percent === undefined ? p.percent : r.percent, stage: r.stage || p.stage, message: r.message || p.message, ahead: r.ahead || 0 };
+-        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message) p.movedAt = Date.now();   // it moved: not stalled
++        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message) p.movedAt = now();   // it moved: not stalled
+         Object.assign(p, next);
+       }
+     }
+   }
+ 
+-  function refill() {
++  /** `readyOnly`: ask for books that are already prepared (the server skips fresh downloads). */
++  function refill({ readyOnly = false } = {}) {
+     if (refilling) return refilling;
+     const avoid = [...known()].slice(-20);
+-    refilling = api("/api/draw", { language, count: batch, seen: seenBooks, avoid }).then((res) => {
++    const body = { language, count: batch, seen: seenBooks, avoid };
++    if (readyOnly) body.ready_only = true;
++    refilling = api("/api/draw", body).then((res) => {
+       if (res.ok) {
+         info.mode = res.mode || info.mode; info.total = res.total ?? info.total;
++        info.sourceState = res.source_state || "ok"; info.notice = res.notice || "";
+         if (res.restarted) seenBooks = [];                          // the visitor has met every book: a fresh round
+         for (const t of res.tickets || []) addTicket(t);
+         for (const p of res.pending || []) {
+-          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: Date.now(), movedAt: Date.now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "", ahead: 0 });
++          if (!pending.has(p.handle)) pending.set(p.handle, { startedAt: now(), movedAt: now(), drawNumber: p.draw_number, total: p.total, percent: 6, stage: "queued", message: "", ahead: 0 });
+         }
+         watchInBackground();
+       }
+@@ -78,10 +87,11 @@
+     /** The next different-book ticket. Waits (with progress callbacks) only if the pouch ran dry. While the
+      *  catalogue is still being opened (first run) it waits and reports the real progress through onOpening. */
+     async next({ onProgress, onOpening, onNotice } = {}) {
+-      const began = Date.now();
++      const began = now();
++      let warmAt = 0;
+       for (let guard = 0; guard < 600; guard++) {
+         if (queue.length) { return { ok: true, ticket: queue.shift() }; }
+-        if (Date.now() - began > maxWaitMs) return { ok: false, code: "slow", message: "Project Gutenberg is very slow right now. Please try another spin in a moment." };
++        if (now() - began > maxWaitMs) return { ok: false, code: "slow", message: "Project Gutenberg is very slow right now. Please try another spin in a moment." };
+         if (!pending.size) {
+           const res = await refill();
+           if (!res.ok) {
+@@ -93,9 +103,19 @@
+         }
+         onProgress?.(summary(), info);
+         await sleep(pollMs);
+-        await pollOnce();
++        await pollOnce().catch(() => {});
++        if (queue.length) continue;
++        // 8-second budget: a fresh download is taking too long, so switch to books that are already prepared. Those pending
++        // downloads keep going in the background and join the pouch if they finish.
++        if (!warmAt && now() - began > coldBudgetMs) {
++          warmAt = now();
++          onNotice?.("The book source is slow, so the librarian is picking from books already on the shelf.");
++          await refill({ readyOnly: true }).catch(() => null);
++          if (queue.length) continue;
++        }
++        if (warmAt && now() - warmAt > graceMs) return { ok: false, code: "slow", message: "The book source is very slow right now. Please try another spin in a moment." };
+         for (const [handle, p] of [...pending]) {      // watchdog: a book that has not moved for a long time is replaced, never waited on forever
+-          if (Date.now() - p.movedAt > stallMs) { pending.delete(handle); onNotice?.("Gutenberg is slow for this one, so the librarian is drawing another book."); }
++          if (now() - p.movedAt > stallMs) { pending.delete(handle); onNotice?.("Gutenberg is slow for this one, so the librarian is drawing another book."); }
+         }
+       }
+       return { ok: false, code: "preparing", message: "The librarian is taking longer than expected. Please try again shortly." };

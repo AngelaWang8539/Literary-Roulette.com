@@ -1,0 +1,43 @@
+--- orig/runtime.py	2026-11-20 07:08:34.634382658 +0000
++++ patched/runtime.py	2026-11-20 11:12:39.212777345 +0000
+@@ -23,6 +23,10 @@
+     Gunicorn workers starting at the same moment all end up with the SAME key (otherwise their tickets would not match)."""
+     env = os.environ.get("LR_SECRET_KEY")
+     if env:
++        if len(env) < 32:
++            if os.environ.get("LR_PRODUCTION") == "1":
++                raise RuntimeError("LR_SECRET_KEY is too short: use 32+ characters (python3 -c 'import secrets; print(secrets.token_hex(32))').")
++            log.warning("LR_SECRET_KEY is shorter than 32 characters; fine for a trial, not for a public site.")
+         return env
+     instance_dir.mkdir(parents=True, exist_ok=True)
+     path = instance_dir / "secret.key"
+@@ -94,7 +98,8 @@
+         self.attach_popularity()
+         self.status_path = instance_dir / "catalogue_status.json"
+         self.csv_override = config.get("CATALOG_CSV") or os.environ.get("LR_CATALOG_CSV")
+-        self.max_age_hours = float(config.get("CATALOGUE_MAX_AGE_HOURS", 24))
++        # the catalogue refresh is a bigger download than a book and the list barely changes: weekly by default
++        self.max_age_hours = float(config.get("CATALOGUE_MAX_AGE_HOURS", os.environ.get("LR_CATALOGUE_MAX_AGE_HOURS") or 168))
+         self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json")
+         self.sync = None
+         self.settings = settings_from_env(config.get("PREP_SETTINGS"))
+@@ -171,3 +176,19 @@
+ 
+     def ready_counts(self):
+         return {code: len(self.lake(code)) + len(self.starters(code)) for code in LANGUAGES}
++
++    # ---- when the book source is unavailable ---------------------------------------------------
++    def source_state(self):
++        """"ok" | "degraded" | "down" (see PrepWorker.source_state)."""
++        return self.worker.source_state()
++
++    def source_notice(self):
++        """A short, honest line for visitors while nothing new can be fetched; "" otherwise."""
++        if self.source_state() == "down":
++            return ("The book source is resting right now, so the librarian is choosing from books already on the shelf. "
++                    "New titles will be back soon.")
++        return ""
++
++    def fallback_pool(self, language):
++        """Books that can be served with no outside request at all: the prepared library plus the bundled starter shelf."""
++        return tuple(self.lake(language)) + tuple(self.starters(language))

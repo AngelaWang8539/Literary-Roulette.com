@@ -135,7 +135,7 @@ async function drawWhenReady(op) {
 }
 
 // ---------- the ocean line: what is waiting, and how much of it you have met ----------
-const ocean = { total: 0, mode: "ocean", met: new Set() };
+const ocean = { total: 0, mode: "ocean", catalogue: null, library: 0, met: new Set() };
 let oceanReady = Promise.resolve();
 function renderOcean() {
   const line = document.getElementById("ocean-line"); if (!line) return;
@@ -146,12 +146,24 @@ function renderOcean() {
   } else if (ocean.total) {
     line.textContent = `A library of ${fmt(ocean.total)} stories. One draw chooses the book; its name stays hidden.` + (ocean.met.size ? ` You have met ${fmt(ocean.met.size)}.` : "");
   }
+  const warning = document.getElementById("catalogue-warning");
+  if (warning) {
+  const failed = ocean.catalogue?.state === "failed";
+  warning.hidden = !failed;
+  warning.textContent = failed
+    ? "Project Gutenberg's catalogue could not be refreshed. We're using a saved catalogue snapshot. While new books are being prepared, some quick spins may come from our local starter shelf. The librarian will keep retrying."
+    : "";
+  }
 }
 async function loadOcean() {
   try {
     const r = await (await fetch(`/api/ocean?language=${encodeURIComponent(LANGUAGE)}`)).json();
-    if (r.ok) { ocean.total = r.total; ocean.mode = r.mode; pouch.info.total = r.total; renderOcean(); }
-    if (r.ok && r.mode !== "ocean") setTimeout(loadOcean, 2000);     // keep checking until the catalogue opens
+    if (r.ok) { ocean.total = r.total; ocean.mode = r.mode; ocean.catalogue = r.catalogue || null; ocean.library = r.library || 0; pouch.info.total = r.total; renderOcean(); }
+    if (r.ok && r.mode !== "ocean") {
+      setTimeout(loadOcean, 2000);
+    } else if (r.ok && r.catalogue?.state === "failed") {
+      setTimeout(loadOcean, 60000);
+    }     // keep checking until the catalogue opens
   } catch { /* the ocean line is a nicety; reading never depends on it */ }
 }
 

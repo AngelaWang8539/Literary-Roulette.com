@@ -1,0 +1,114 @@
+--- orig/prep.py	2026-11-20 07:08:34.634310933 +0000
++++ patched/prep.py	2026-11-20 11:12:26.078988883 +0000
+@@ -14,6 +14,7 @@
+   grow the library in the background within the source's courtesy limits, up to `library_target` books per language
+   ("all" in production). Under overload the worker sheds cold picks (see estimated_wait) instead of queueing forever.
+ """
++import functools
+ import hashlib
+ import heapq
+ import json
+@@ -51,7 +52,8 @@
+         self.failed_keep = int(kw.get("failed_keep", 300))
+         self.replenish = bool(kw.get("replenish", True))
+         self.breaker_threshold = int(kw.get("breaker_threshold", 6))   # consecutive temporary failures that pause fetching
+-        self.breaker_seconds = float(kw.get("breaker_seconds", 120))
++        self.breaker_seconds = float(kw.get("breaker_seconds", 120))   # first pause; doubles on each repeat ...
++        self.breaker_cap = float(kw.get("breaker_cap", 3600))          # ... up to this many seconds
+ 
+ 
+ def edition_key_for(book):
+@@ -76,7 +78,9 @@
+         self.state_dir = Path(state_dir)
+         self.lock_dir = self.state_dir / ".locks"
+         self.failed_path = self.state_dir / "failed.json"
+-        self._fetch = fetcher or source.fetch_clean_text
++        # Per-host health (shared by every process through state_dir): hosts that keep failing rest, with growing pauses.
++        self.health = source.SourceHealth(self.state_dir / "source_health.json", clock=clock)
++        self._fetch = fetcher or functools.partial(source.fetch_clean_text, health=self.health)
+         self._fetch_reports_progress = fetcher is None
+         self.wave = {lang: self.settings.first_wave for lang in catalogues}
+         self._sleep, self._clock = sleep, clock
+@@ -84,7 +88,7 @@
+         self.state_dir.mkdir(parents=True, exist_ok=True)
+         self.store = jobstate.JobStore(self.state_dir / "jobs.sqlite", clock=clock)     # progress every process can see
+         self.gate = source.SharedRateGate(self.state_dir / ".gate", self.settings.min_interval)   # courtesy gap, machine-wide
+-        self._fail_streak, self._breaker_until = 0, 0.0
++        self._fail_streak, self._breaker_until, self._breaker_level = 0, 0.0, 0
+         self._downloads = threading.BoundedSemaphore(max(1, self.settings.source_concurrency))
+         self._cv = threading.Condition()
+         self._heap, self._delayed, self._seq = [], [], 0
+@@ -243,19 +247,33 @@
+             if job:
+                 self._process(job)
+ 
++    def breaker_remaining(self):
++        """Seconds until downloads may start again: the pause below, or every source host resting (SourceHealth), whichever is longer."""
++        own = max(0.0, self._breaker_until - self._clock())
++        return max(own, self.health.rest_left_all(source.source_hosts()))
++
+     def breaker_open(self):
+-        return self._clock() < self._breaker_until
++        return self.breaker_remaining() > 0
++
++    def source_state(self):
++        """"ok" | "degraded" (first-choice mirror resting, another serving) | "down" (nothing can be asked: serve prepared books only)."""
++        if self.breaker_open():
++            return "down"
++        return self.health.state(source.source_hosts())
+ 
+     def _note_result(self, ok, transient=False):
+-        """Circuit breaker: a run of temporary failures (server down, blocked) pauses fetching instead of hammering Gutenberg."""
++        """Circuit breaker: a run of temporary failures (server down, blocked) pauses fetching instead of hammering Gutenberg.
++        Each repeated pause is twice as long as the last (120 s, 240 s, ... up to breaker_cap); one success starts over."""
+         if ok:
+-            self._fail_streak = 0
++            self._fail_streak = self._breaker_level = 0
+         elif transient:
+             self._fail_streak += 1
+             if self._fail_streak >= self.settings.breaker_threshold:
+-                self._breaker_until = self._clock() + self.settings.breaker_seconds
++                seconds = min(self.settings.breaker_cap, self.settings.breaker_seconds * 2 ** self._breaker_level)
++                self._breaker_until = self._clock() + seconds
++                self._breaker_level += 1
+                 self._fail_streak = 0
+-                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs", self.settings.breaker_seconds)
++                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs (pause #%d)", seconds, self._breaker_level)
+ 
+     def _process(self, job):
+         try:
+@@ -277,6 +295,8 @@
+                 self._prepare(job)
+                 self._note_result(True)
+                 self._finish(job, done=True)
++            except source.SourceResting as exc:    # every address is resting: nothing was asked, nothing counts against the book
++                self._finish(job, requeue_after=max(1.0, exc.wait), count_attempt=False)
+             except source.SourceError as exc:
+                 job.error = str(exc)
+                 if job.kind == COLD:
+@@ -396,7 +416,7 @@
+         start per gap. While the circuit breaker is open the wait is reported as long, so draws shed to prepared books."""
+         wait = self.store.pending_cold() * self.settings.min_interval
+         if self.breaker_open():
+-            wait += (self._breaker_until - self._clock()) + self.settings.max_cold_wait + 1
++            wait += self.breaker_remaining() + self.settings.max_cold_wait + 1
+         return wait
+ 
+     def job_view(self, language, book_token):
+@@ -460,6 +480,8 @@
+         """Queue the next wave of fresh random books wherever a lake is below its target. Returns books queued."""
+         if not self.settings.replenish or not self.universe or not self.universe.available:
+             return 0
++        if self.breaker_open():                 # the source is resting: do not line up more downloads for it
++            return 0
+         queued = 0
+         for language in self.catalogues:
+             deficit = self.lake_deficit(language)
+@@ -503,6 +525,7 @@
+                 "queued": sum(1 for j in jobs if j.state == "queued"),
+                 "active": sum(1 for j in jobs if j.state == "running"),
+                 "failed": len(self._failed), "breaker_open": self.breaker_open(),
++                "source": {"state": self.source_state(), "hosts": self.health.snapshot()},
+                 "languages": {
+                     lang: {"lake": len(self.lake_ids(lang)), "target": self.lake_target(lang),
+                            "pending": sum(1 for j in jobs if j.language == lang),

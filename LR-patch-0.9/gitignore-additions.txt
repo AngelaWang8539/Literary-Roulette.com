@@ -1,0 +1,10 @@
+instance/
+*.sqlite
+*.sqlite3
+*.db
+secret.key
+.env
+__pycache__/
+.venv/
+.idea/
+.DS_Store
