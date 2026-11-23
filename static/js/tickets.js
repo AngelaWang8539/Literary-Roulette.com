@@ -106,7 +106,7 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 2, maxS
     /** Call when a ticket has actually been displayed. */
     shown(ticket) {
       current = ticket; rememberBook(ticket.book_token);
-      if (queue.length <= lowWater) refill().catch(() => {});     // quiet top-up
+      if (queue.length < lowWater) refill().catch(() => {});     // quiet top-up
       const set = passageSet(ticket.book_token); set.add(ticket.token);
       if (set.size > maxSeenPassages) set.delete(set.values().next().value);
       companion = { bookToken: ticket.book_token, promise: null };

@@ -73,7 +73,7 @@ class Runtime:
             books = override if override is not None else load_json_list(folder / "books.json", self.problems)
             self.catalogues[language] = Catalogue(
                 books, self.secret, language, texts_dir=texts_dir, manifest=load_manifest(texts_dir),
-                covers_dir=base / "static" / "covers", allow_pending_rights=config.get("ALLOW_PENDING_RIGHTS", False))
+                allow_pending_rights=config.get("ALLOW_PENDING_RIGHTS", False))
         self.universe_path = Path(config.get("UNIVERSE_PATH") or instance_dir / "universe.sqlite")
         self.seed_path = Path(config.get("UNIVERSE_SEED_PATH") or data_dir / "universe_seed.sqlite")
         if not self.universe_path.exists() and self.seed_path.exists():

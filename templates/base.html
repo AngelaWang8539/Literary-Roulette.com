@@ -7,6 +7,9 @@
   <meta name="description" content="Read a random passage first. Find out which book it came from when you choose to.">
 
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}" media="(max-width: 700px)">
+  <link rel="preload" href="{{ url_for('static', filename='fonts/share/lora-latin-400-normal.woff2') }}" as="font" type="font/woff2" crossorigin media="(max-width: 700px)">
+  <link rel="preload" href="{{ url_for('static', filename='fonts/share/poppins-latin-400-normal.woff2') }}" as="font" type="font/woff2" crossorigin media="(max-width: 700px)">
   <meta name="theme-color" content="#ffffff">
 </head>
 <body data-language="{{ language|default('en') }}">
@@ -23,7 +26,7 @@
       <a href="{{ url_for('index') }}#saved" data-view="#saved">My Saved Books</a>
       <a href="{{ url_for('about') }}">About</a>
     </nav>
-    <div class="language-bar"></div>
+    <div class="language-bar"><a class="strip-link" href="{{ url_for('index') }}#history"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4.5v4h4M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>My History</a></div>
   </header>
   <main id="main">{% block main %}{% endblock %}</main>
   <footer class="site-footer">

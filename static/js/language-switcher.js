@@ -58,7 +58,9 @@
   'label[aria-label="选择阅读语言"]',                     // 中文
   'label[aria-label="Choisir la langue de lecture"]',    // Français
 ].join(",");
-  const COUNT = /\s*[·•\-–—|(\[]\s*\d+\s*ready\s*[)\]]?\s*$/i;
+  const COUNT = matchMedia("(max-width: 700px)").matches
+    ? /\s*[·•\-–—|(\[]\s*[\d.,\s\u00a0\u202f]+\s*(?:ready|books?)\s*[)\]]?\s*$/i   // phone: just the language name
+    : /\s*[·•\-–—|(\[]\s*\d+\s*ready\s*[)\]]?\s*$/i;
   function dock() {
     const box = document.querySelector(SELECTOR);
     const bar = document.querySelector(".language-bar");

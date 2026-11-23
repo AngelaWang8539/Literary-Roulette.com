@@ -245,7 +245,8 @@ def create_app(test_config=None):
                 else:
                     shed += 1
             # Always keep the reader's ready-to-serve pouch stocked.
-            if len(out) < count:
+            # Pending cold picks already occupy their draw slots.
+            if len(out) + len(pending) < count:
                 taken = {t["book_token"] for t in out} | {p["handle"] for p in pending}
                 used_tokens = seen | taken
 
@@ -259,7 +260,7 @@ def create_app(test_config=None):
                 ]
 
                 backups, _ = draw.pick_books(
-                    fresh_ready, cat.book_token, count - len(out), set(), rng()
+                    fresh_ready, cat.book_token, count - len(out) - len(pending), set(), rng()
                 )
 
                 out.extend(

@@ -82,11 +82,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
 .journey dt { font-size: .8rem; color: var(--muted); }
 .journey dd { margin: 0; font-family: var(--serif); font-size: 1.5rem; color: var(--forest); }
 
-.details { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1.5rem; margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); box-shadow: 0 6px 18px rgba(60, 50, 20, .06); }
+.details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); box-shadow: 0 6px 18px rgba(60, 50, 20, .06); }
 .details[hidden] { display: none; }
-.cover { width: 150px; aspect-ratio: 2 / 3; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: linear-gradient(160deg, var(--forest), var(--forest-deep)); }
-.cover img { width: 100%; height: 100%; object-fit: cover; }
-.monogram { font-family: var(--serif); font-size: 4rem; color: #e9dfc2; }
 .details h2 { margin: 0; font-family: var(--serif); font-size: 1.9rem; line-height: 1.2; color: var(--forest); }
 .details h3 { margin: 1.25rem 0 .5rem; font-size: 1rem; }
 .author { margin: .15rem 0 .5rem; font-family: var(--serif); font-size: 1.15rem; }
@@ -110,8 +107,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem) 2rem
   .tagline { border-left: 0; padding-left: 0; }
 }
 @media (max-width: 560px) {
-  .details { grid-template-columns: 1fr; }
-  .cover { width: 110px; }
   .brand { font-size: 1.5rem; }
   .links li { max-width: none; }
 }
@@ -272,14 +267,12 @@ a { color: var(--ink); }
 .journey dd, .details h2, .view h2, .card h3, .prose h1, .prose h2, .confirm h2 { color: var(--ink); }
 .details { background: var(--paper); border-radius: 2px; box-shadow: none; }
 .details h2 { text-transform: none; }
-.monogram { color: #cfc6b4; }
 .chips li { border-color: var(--ink); color: var(--ink); }
 .banner { background: #f0f0f0; border-left-color: var(--ink); }
 .demo-notice { background: var(--tan); }
 .popularity-badge { border-color: var(--ink); background: #fff; }
 .popularity-badge.tier-jackpot, .popularity-badge.tier-lucky, .popularity-badge.tier-discovery, .popularity-badge.tier-hidden-gem { background: var(--tan); border-color: var(--ink); }
 .popularity-label::before { color: var(--ink) !important; }
-.cover { background: var(--ink); }
 .site-footer { border-top: 1px solid var(--line); }
 @media (max-width: 860px) { .passage-card { min-height: 21rem; } .passage-text { font-size: 1.22rem; } }
 
@@ -307,3 +300,7 @@ a { color: var(--ink); }
 .librarian .bar.indet i { width: 35%; animation: lr-indet 1.3s ease-in-out infinite alternate; }
 @keyframes lr-indet { from { margin-left: 0; } to { margin-left: 65%; } }
 @media (prefers-reduced-motion: reduce) { .librarian .bar.indet i { animation: none; margin-left: 32%; } }
+
+/* two labels for one button: the long one on computers, the short one in the phone tray (see mobile.css) */
+.lab-m, .strip-link { display: none; }
+.popularity-badge { width: fit-content; max-width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; }   /* concise badge: a small chip, not a full-width bar */

@@ -6,6 +6,7 @@ import { splitPassages } from "./chunker.js";
 import * as roulette from "./roulette.js";
 import * as Librarian from "./librarian.js";
 import { createTicketPouch } from "./tickets.js";
+import { badgeText } from "./badge.js";
 import {cardBlob, shareOrDownload, describeShare, shareLink} from "./sharecard.js";
 
 const $ = (id) => document.getElementById(id);
@@ -15,7 +16,7 @@ const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matche
 const ui = {
   text: $("passage-text"), note: $("passage-note"), start: $("start"), status: $("status"),
   another: $("btn-another"), reveal: $("btn-reveal"), spin: $("btn-spin"), hide: $("btn-hide"), save: $("btn-save"),
-  revealLabel: $("reveal-label"), revealSub: $("reveal-sub"), details: $("book-details"), cover: $("cover"),
+  revealLabel: $("reveal-label"), revealSub: $("reveal-sub"), details: $("book-details"),
   demo: $("demo-notice"), title: $("book-title"), author: $("book-author"), popularity: $("book-popularity"), genres: $("book-genres"), desc: $("book-description"),
   pub: $("book-publication"), source: $("book-source"), links: $("book-links"), noLinks: $("no-links"),
   credit: $("credit"), contentNote: $("content-note"), awareness: $("awareness"), banner: $("mode-banner"),
@@ -205,16 +206,16 @@ function renderBook(b) {
   ui.demo.hidden = !b.is_demo;
   ui.popularity.replaceChildren();
   ui.popularity.className = "popularity-badge";
-  if (b.popularity && b.popularity.label) {
-    const tier = ["jackpot", "lucky", "discovery", "hidden-gem"].includes(b.popularity.tier)
-      ? b.popularity.tier : "discovery";
+  const badge = badgeText(b.popularity);
+  if (badge) {
+    const tier = ["jackpot", "lucky", "discovery", "hidden-gem"].includes(b.popularity.tier) ? b.popularity.tier : "discovery";
     ui.popularity.classList.add(`tier-${tier}`);
-    ui.popularity.append(el("span", "popularity-label", b.popularity.label));
-    if (b.popularity.detail) ui.popularity.append(el("small", "popularity-detail", b.popularity.detail));
+    ui.popularity.append(el("span", "popularity-label popularity-pill", badge.short));
     ui.popularity.hidden = false;
     markNewToYou(b);
+    // the full sentence lives in the tooltip and the screen-reader label, not on screen
     ui.popularity.title = b.popularity.note || "Based on Project Gutenberg's approximate downloads in the previous 30 days; this is popularity, not literary quality.";
-    ui.popularity.setAttribute("aria-label", `${b.popularity.label}. ${b.popularity.detail || ""}`.trim());
+    ui.popularity.setAttribute("aria-label", [b.popularity.label, b.popularity.detail].filter(Boolean).join(". "));
   } else {
     ui.popularity.hidden = true;
     ui.popularity.removeAttribute("title");
@@ -224,11 +225,8 @@ function renderBook(b) {
   ui.pub.textContent = b.publication || ""; ui.pub.hidden = !b.publication;
   const src = [b.source?.edition, b.source?.location].filter(Boolean).join(", ");
   ui.source.textContent = src ? "This passage: " + src + "." : ""; ui.source.hidden = !src;
-  ui.cover.replaceChildren();
-  if (b.cover_url) { const img = el("img"); img.src = b.cover_url; img.alt = ""; ui.cover.append(img); }
-  else ui.cover.append(el("span", "monogram", b.title.replace(/^(the|a|an)\s+/i, "").charAt(0)));
-  ui.links.replaceChildren(...(b.links || []).map((l) => {
-    const li = el("li"), a = el("a", "btn link"); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer";
+  ui.links.replaceChildren(...(b.links || []).map((l, i) => {
+    const li = el("li"), a = el("a", "btn link" + (i === 0 ? " first" : "")); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer";
     a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab")); li.append(a); return li;
   }));
   ui.noLinks.hidden = (b.links || []).length > 0;
@@ -278,7 +276,7 @@ $("btn-share")?.addEventListener("click", async () => {
   try {
     const pop = S.book.popularity, genres = (S.book.genres || []).slice(0, 2).join(" \u00b7 ");
     const blob = await cardBlob({ text: ui.text.textContent, title: S.book.title, author: S.book.author,
-      badge: pop && pop.label ? { label: pop.short || pop.label, tier: pop.tier } : null,
+      badge: badgeText(pop) ? { label: badgeText(pop).long, tier: pop.tier } : null,
       meta: [S.book.publication, genres].filter(Boolean), source: S.book.source && S.book.source.location,
       pill: S.book.is_demo ? "Sample card" : "" });
          const how = await shareOrDownload(blob, { title: S.book.title, text: `${S.book.title} \u2014 found on Literary Roulette`, url: shareLink(ui.text.textContent) });

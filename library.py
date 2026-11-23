@@ -69,11 +69,10 @@ def file_sha256(path):
 
 
 class Catalogue:
-    def __init__(self, books, secret, language="en", *, texts_dir=None, manifest=None, covers_dir=None,
+    def __init__(self, books, secret, language="en", *, texts_dir=None, manifest=None,
                  allow_pending_rights=False):
         self.language = language
         self.texts_dir = Path(texts_dir) if texts_dir else None
-        self.covers_dir = Path(covers_dir) if covers_dir else None
         self.manifest = manifest or {}
         self.allow_pending_rights = bool(allow_pending_rights)
         self._secret = secret.encode("utf-8") if isinstance(secret, str) else secret
@@ -192,15 +191,6 @@ class Catalogue:
             found["read"] = f"https://www.gutenberg.org/ebooks/{book['gutenberg_id']}"
         return {k: found[k] for k in LINK_KINDS if k in found}
 
-    def cover_url(self, book):
-        cover = book.get("cover")
-        if not (isinstance(cover, dict) and cover.get("file") and cover.get("usage_rights")):
-            return None
-        name = cover["file"]
-        if not SAFE_FILENAME.fullmatch(name) or not self.covers_dir or not (self.covers_dir / name).is_file():
-            return None
-        return f"/static/covers/{name}"
-
     def _credit(self, book):
         provider = book.get("source_provider", "Project Gutenberg" if book.get("gutenberg_id") else "Source archive")
         url = book.get("source_url")
@@ -226,7 +216,7 @@ class Catalogue:
             "publication": " ".join(bits) or None,
             "is_demo": book.get("is_demo") is True,
             "content_note": book.get("content_note") or None,
-            "source_credit": self._credit(book), "cover_url": self.cover_url(book),
+            "source_credit": self._credit(book),
             "source": {"edition": f"Project Gutenberg eBook #{book['gutenberg_id']}" if book.get("gutenberg_id") else None,
                        "location": location},
             "popularity": book.get("popularity"),

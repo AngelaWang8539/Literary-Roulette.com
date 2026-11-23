@@ -1,3 +1,9 @@
+## 1.0 - phone reading layout (computer look unchanged)
+
+- New `static/mobile.css`, loaded only on screens up to 700px wide (`media` attribute in `base.html`): Lora/Poppins fonts, dark header with a rounded reading sheet, compact language pill, icon tray for the three actions, clean book card. `static/style.css` (the computer look) is untouched apart from the cover leftovers.
+- Cover pictures removed everywhere (template, `app.js`, `library.py`, `runtime.py`, CSS).
+- Popularity badge shortened ("Top 1%", "Top 10 this month", "Last 10%", "Discovery") by `static/js/badge.js` from the same data; full sentence in the tooltip. Share card uses the longer wording.
+
 ## 0.10 - one badge, one share card
 
 - Badge: every tier has its own tone and mark, several wordings (a book always keeps its line), a real rank and download fact for the quiet tiers, and a "New to you" chip from this device's recent history. Books outside Gutenberg's monthly top 100 now use the catalogue's own download percentile instead of one repeated line.
