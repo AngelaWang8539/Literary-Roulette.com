@@ -1,3 +1,9 @@
+## 1.3 - book card, phone first screen (includes 1.2)
+
+- Book card rebuilt to show only what helps: status badges + "Hide" on the top row; title; "By First Last" with years and illustrator as a small muted line; up to 3 tinted tags without the "Category:" prefix; a pull-quote from the passage just read; one primary "Read online" button and three quiet ghost buttons (Save, Share, Copy link); the "Had you heard of this book?" poll as a warm band with a thank-you after the answer.
+- New `static/js/bookcard.js` (names, tags, pull-quote; pure functions with tests). The card is styled once, in the last block of `static/style.css`; `mobile.css` only adds phone tweaks. About 34 old card rules were removed.
+- Phone first screen (patch 1.2): 56px header, 45px language bar, 13px intro, reading card about 60% of the screen, compact tray, notices moved under the tray, small footer.
+
 ## 1.0 - phone reading layout (computer look unchanged)
 
 - New `static/mobile.css`, loaded only on screens up to 700px wide (`media` attribute in `base.html`): Lora/Poppins fonts, dark header with a rounded reading sheet, compact language pill, icon tray for the three actions, clean book card. `static/style.css` (the computer look) is untouched apart from the cover leftovers.

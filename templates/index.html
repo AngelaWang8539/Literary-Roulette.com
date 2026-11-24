@@ -57,30 +57,37 @@
 <section id="book-details" class="details" aria-labelledby="book-title" tabindex="-1" hidden>
   <div class="details-body">
     <p id="demo-notice" class="demo-notice" hidden>Demonstration book: the text is fictional and written for testing. Any links shown are placeholders, not real stores.</p>
+    <div class="card-top">
+      <div id="book-popularity" class="popularity-badge" hidden></div>
+      <button id="btn-hide" class="hide-link" type="button" aria-label="Hide book details"><span aria-hidden="true">&times;</span> <span>Hide</span></button>
+    </div>
     <h2 id="book-title"></h2>
     <p id="book-author" class="author"></p>
-    <div id="book-popularity" class="popularity-badge" hidden></div>
+    <p id="book-byline" class="byline" hidden></p>
     <ul id="book-genres" class="chips" aria-label="Genres"></ul>
     <p id="book-description" class="description"></p>
+    <blockquote id="book-teaser" class="teaser" hidden></blockquote>
     <p id="book-publication" class="meta" hidden></p>
     <p id="book-source" class="meta" hidden></p>
-    <h3>Where to go next</h3>
+    <h3 class="sr">Where to go next</h3>
     <ul id="book-links" class="links"></ul>
     <p id="no-links" class="meta" hidden>No reading, borrowing or buying links have been added for this book yet.</p>
-    <p id="credit" class="meta" hidden></p>
-    <p id="content-note" class="demo-notice" hidden></p>
-    <div class="row">
-      <button id="btn-save" class="btn quiet" type="button" aria-pressed="false">Save this book</button>
-      <button id="btn-hide" class="btn quiet" type="button">Hide book details</button>
-      <button id="btn-share" class="btn quiet" type="button" hidden>Share this discovery</button>
-      <button id="btn-copy-link" class="btn quiet" type="button" hidden>Copy link</button>
+    <div class="card-actions">
+      <button id="btn-save" class="cbtn ghost" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span id="save-label">Save</span></button>
+      <button id="btn-share" class="cbtn ghost" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17L17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Share</span></button>
+      <button id="btn-copy-link" class="cbtn ghost" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Copy link</span></button>
     </div>
     <p id="share-note" class="meta" hidden></p>
+    <p id="credit" class="meta" hidden></p>
+    <p id="content-note" class="demo-notice" hidden></p>
     <div id="awareness" class="awareness" role="group" aria-labelledby="aw-q" hidden>
-      <p id="aw-q">Had you heard of this book before today?</p>
-      <button class="btn quiet" type="button" data-answer="known">Yes</button>
-      <button class="btn quiet" type="button" data-answer="unknown">No</button>
-      <button class="btn quiet" type="button" data-answer="unsure">Not sure</button>
+      <p id="aw-q">Had you heard of this book?</p>
+      <div class="aw-pills">
+        <button type="button" data-answer="known">Yes</button>
+        <button type="button" data-answer="unknown">No</button>
+        <button type="button" data-answer="unsure">Not sure</button>
+      </div>
+      <p id="aw-thanks" class="aw-thanks" role="status" hidden></p>
     </div>
   </div>
 </section>

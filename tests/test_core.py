@@ -897,7 +897,7 @@ class SourceFallbackTests(unittest.TestCase):
 class FrontEndTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js is not installed")
     def test_javascript_logic(self):
-        for script in ("front_tests.mjs", "storage_tests.mjs", "share_tests.mjs", "badge_tests.mjs"):
+        for script in ("front_tests.mjs", "storage_tests.mjs", "share_tests.mjs", "badge_tests.mjs", "bookcard_tests.mjs"):
             out = subprocess.run(["node", f"tests/js/{script}"], capture_output=True, text=True, timeout=120)
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
 

@@ -7,6 +7,7 @@ import * as roulette from "./roulette.js";
 import * as Librarian from "./librarian.js";
 import { createTicketPouch } from "./tickets.js";
 import { badgeText } from "./badge.js";
+import { formatAuthor, cleanGenres, teaserFrom } from "./bookcard.js";
 import {cardBlob, shareOrDownload, describeShare, shareLink} from "./sharecard.js";
 
 const $ = (id) => document.getElementById(id);
@@ -18,6 +19,7 @@ const ui = {
   another: $("btn-another"), reveal: $("btn-reveal"), spin: $("btn-spin"), hide: $("btn-hide"), save: $("btn-save"),
   revealLabel: $("reveal-label"), revealSub: $("reveal-sub"), details: $("book-details"),
   demo: $("demo-notice"), title: $("book-title"), author: $("book-author"), popularity: $("book-popularity"), genres: $("book-genres"), desc: $("book-description"),
+  byline: $("book-byline"), teaser: $("book-teaser"), saveLabel: $("save-label"), awThanks: $("aw-thanks"),
   pub: $("book-publication"), source: $("book-source"), links: $("book-links"), noLinks: $("no-links"),
   credit: $("credit"), contentNote: $("content-note"), awareness: $("awareness"), banner: $("mode-banner"),
 };
@@ -174,7 +176,7 @@ const fromApi = (d, book = null) => ({ source: "catalogue", token: d.token, tick
 function showPassage(p, { record = true } = {}) {
   Object.assign(S, { source: p.source, token: p.token || null, ticket: p.ticket || null, bookKey: p.bookKey, passageKey: p.passageKey });
   ui.start.hidden = true;
-  ui.text.textContent = p.text;
+  ui.text.textContent = p.text; if (S.detailsOpen) setTeaser();
   ui.text.scrollTop = 0; ui.text.closest(".passage-scroll")?.scrollTo(0, 0);
   ui.note.textContent = (p.notes || []).join(". "); ui.note.hidden = !(p.notes && p.notes.length);
   ui.banner.hidden = p.source !== "upload";
@@ -200,9 +202,18 @@ function markNewToYou(b) {
     if (isNew && S.book === b && !ui.popularity.hidden && !ui.popularity.querySelector(".popularity-new")) ui.popularity.prepend(el("span", "popularity-new", "New to you"));
   });
 }
+const EXTERNAL = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17L17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function setTeaser() { const t = teaserFrom(ui.text.textContent); ui.teaser.textContent = t; ui.teaser.hidden = !t; }   // a pull-quote from the passage just read
+function resetAwareness() { ui.awareness.classList.remove("answered"); ui.awThanks.hidden = true; ui.awThanks.textContent = ""; }
+const THANKS = { known: "A familiar friend. Thanks for telling us.", unknown: "A fresh discovery. Thanks for telling us.", unsure: "Not sure is a fair answer. Thanks for telling us." };
 function renderBook(b) {
   if (!ui.popularity) { ui.popularity = el("div", "popularity-badge"); ui.author.after(ui.popularity); } // self-heal an older template
-  ui.title.textContent = b.title; ui.author.textContent = "by " + b.author; ui.desc.textContent = b.description || "";
+  const who = formatAuthor(b.author);
+  ui.title.textContent = b.title; ui.desc.textContent = b.description || "";
+  ui.author.textContent = who.by ? "By " + who.by : ""; ui.author.hidden = !who.by;
+  ui.byline.replaceChildren(...[who.years, ...who.roles].filter(Boolean).map((t) => el("span", "", t)));   // years, then "Illustrated by ..."; the dots are CSS
+  ui.byline.hidden = !ui.byline.firstChild;
+  setTeaser();
   ui.demo.hidden = !b.is_demo;
   ui.popularity.replaceChildren();
   ui.popularity.className = "popularity-badge";
@@ -210,7 +221,7 @@ function renderBook(b) {
   if (badge) {
     const tier = ["jackpot", "lucky", "discovery", "hidden-gem"].includes(b.popularity.tier) ? b.popularity.tier : "discovery";
     ui.popularity.classList.add(`tier-${tier}`);
-    ui.popularity.append(el("span", "popularity-label popularity-pill", badge.short));
+    ui.popularity.append(el("span", "popularity-pill", badge.short));
     ui.popularity.hidden = false;
     markNewToYou(b);
     // the full sentence lives in the tooltip and the screen-reader label, not on screen
@@ -221,13 +232,13 @@ function renderBook(b) {
     ui.popularity.removeAttribute("title");
     ui.popularity.removeAttribute("aria-label");
   }
-  ui.genres.replaceChildren(...(b.genres || []).map((g) => el("li", "", g)));
+  ui.genres.replaceChildren(...cleanGenres(b.genres).slice(0, 3).map((g) => el("li", "", g)));
   ui.pub.textContent = b.publication || ""; ui.pub.hidden = !b.publication;
   const src = [b.source?.edition, b.source?.location].filter(Boolean).join(", ");
   ui.source.textContent = src ? "This passage: " + src + "." : ""; ui.source.hidden = !src;
   ui.links.replaceChildren(...(b.links || []).map((l, i) => {
-    const li = el("li"), a = el("a", "btn link" + (i === 0 ? " first" : "")); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer";
-    a.append(el("span", "", l.label), el("span", "sub", "Opens in a new tab")); li.append(a); return li;
+    const li = el("li"), a = el("a", "cbtn " + (i === 0 ? "primary" : "ghost")); a.href = l.href; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.append(el("span", "", l.label), el("span", "sr", "Opens in a new tab")); a.insertAdjacentHTML("beforeend", EXTERNAL); li.append(a); return li;
   }));
   ui.noLinks.hidden = (b.links || []).length > 0;
   ui.credit.replaceChildren();
@@ -241,7 +252,9 @@ function renderBook(b) {
 async function refreshSaveButton() {
   await ready;
   const saved = S.book && (await lib.isSaved(S.source, S.bookKey));
-  ui.save.textContent = saved ? "Saved. Remove from saved" : "Save this book";
+  ui.saveLabel.textContent = saved ? "Saved" : "Save";
+  ui.save.title = saved ? "Remove from saved" : "";
+  ui.save.classList.toggle("on", !!saved);
   ui.save.setAttribute("aria-pressed", saved ? "true" : "false");
 }
 function openDetails(book) {
@@ -252,7 +265,7 @@ function openDetails(book) {
   refreshSaveButton();
 }
 function closeDetails(tellServer) {
-  ui.details.hidden = true; S.detailsOpen = false; ui.awareness.hidden = true;
+  ui.details.hidden = true; S.detailsOpen = false; ui.awareness.hidden = true; resetAwareness();
   ui.reveal.setAttribute("aria-expanded", "false");
   ui.revealLabel.textContent = "Reveal this book"; ui.revealSub.textContent = "See the title, author and where to read it";
   if (tellServer && S.source === "catalogue" && S.bookKey) logEvent("book_hidden");
@@ -260,7 +273,7 @@ function closeDetails(tellServer) {
 function afterReveal(book) {
   openDetails(book); counts.books++; updateCounts(); // show the book first; the counter follows
   ready.then(() => lib.markBookRevealed(S.source, S.bookKey, book)).catch(() => {});
-  ui.awareness.hidden = S.source !== "catalogue";
+  resetAwareness(); ui.awareness.hidden = S.source !== "catalogue";
   const shareBtn = $("btn-share"); if (shareBtn) shareBtn.hidden = S.source !== "catalogue";
   const copyBtn = $("btn-copy-link"); if (copyBtn) copyBtn.hidden = S.source !== "catalogue";
   setStatus("Book revealed. Your passage has not changed.");
@@ -275,7 +288,7 @@ $("btn-share")?.addEventListener("click", async () => {
   btn.setAttribute("aria-disabled", "true");
   try {
     const pop = S.book.popularity, genres = (S.book.genres || []).slice(0, 2).join(" \u00b7 ");
-    const blob = await cardBlob({ text: ui.text.textContent, title: S.book.title, author: S.book.author,
+    const blob = await cardBlob({ text: ui.text.textContent, title: S.book.title, author: formatAuthor(S.book.author).by || S.book.author,
       badge: badgeText(pop) ? { label: badgeText(pop).long, tier: pop.tier } : null,
       meta: [S.book.publication, genres].filter(Boolean), source: S.book.source && S.book.source.location,
       pill: S.book.is_demo ? "Sample card" : "" });
@@ -366,7 +379,8 @@ ui.links.addEventListener("click", (e) => { if (e.target.closest("a")) { counts.
 ui.awareness.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-answer]"); if (!b || !S.bookKey) return;
   logEvent("awareness_" + b.dataset.answer);
-  ui.awareness.hidden = true; setStatus("Thanks for answering.");
+  ui.awThanks.textContent = THANKS[b.dataset.answer] || THANKS.unsure; ui.awThanks.hidden = false;   // a thank-you inside the same banner; no invented statistics
+  ui.awareness.classList.add("answered");
 });
 ui.save.addEventListener("click", async () => {
   if (!S.book) return;
