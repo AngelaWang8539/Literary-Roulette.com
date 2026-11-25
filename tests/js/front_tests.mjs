@@ -168,5 +168,40 @@ await test("a fast failure shows no drawing; a slow failure shows the friendly d
   assert.ok(root.querySelector("svg").innerHTML.includes("Oops! A book escaped.")); assert.equal(caption(), "Could not reach the site.");
 });
 
+await test("books met in earlier sessions are sent from the very first draw, and survive reset()", async () => {
+  const { api, calls } = fakeServer(); const pouch = createTicketPouch({ api, language: "en", batch: 3 });
+  pouch.seed(["old1", "old2", "old1", ""]);                                      // history restored before the first draw; duplicates and blanks ignored
+  assert.deepEqual(pouch.seenBooks, ["old1", "old2"]);
+  pouch.reset();                                                                // "open the catalogue again" must not wipe the memory
+  const a = await pouch.next(); pouch.shown(a.ticket);
+  const first = calls.find((c) => c[0] === "/api/draw")[1];
+  assert.deepEqual(first.seen, ["old1", "old2"]);
+  const later = pouch.seenBooks; assert.ok(later.includes("old1") && later.includes(a.ticket.book_token)); pouch.stop();
+});
+await test("forget() clears the memory (history cleared), and a server restart signal starts a fresh round", async () => {
+  const { api } = fakeServer(); const pouch = createTicketPouch({ api, language: "en" });
+  pouch.seed(["a", "b"]); pouch.forget(); assert.deepEqual(pouch.seenBooks, []);
+  const restarting = async (path, body) => path === "/api/draw" ? { ok: true, mode: "ocean", restarted: true, total: 3, pending: [], tickets: [{ ticket: "t", token: "p", book_token: "z", text: "x" }] } : { ok: true, results: [] };
+  const p2 = createTicketPouch({ api: restarting, language: "en" }); p2.seed(["a", "b"]);
+  await p2.refill(); assert.deepEqual(p2.seenBooks, []); p2.stop();
+});
+await test("seeding keeps only the most recent books when there are more than the pouch remembers", async () => {
+  const { api } = fakeServer(); const pouch = createTicketPouch({ api, language: "en", maxSeenBooks: 5 });
+  pouch.seed(["1", "2", "3", "4", "5", "6", "7"]); assert.deepEqual(pouch.seenBooks, ["3", "4", "5", "6", "7"]);
+});
+await test("a queue that is getting shorter counts as movement, so the watchdog does not replace the pick", async () => {
+  let polls = 0; const calls = [];
+  const api = async (path, body) => {
+    calls.push(path);
+    if (path === "/api/draw") return calls.filter((c) => c === "/api/draw").length === 1
+      ? { ok: true, mode: "ocean", total: 9, restarted: false, tickets: [], pending: [{ handle: "h1", draw_number: 1, total: 9 }] }
+      : { ok: true, mode: "ocean", total: 9, restarted: false, tickets: [], pending: [] };
+    polls++;
+    return { ok: true, results: [polls < 8 ? { handle: "h1", state: "working", stage: "queued", percent: 6, message: "Waiting in the queue", ahead: 8 - polls }
+      : { handle: "h1", state: "ready", percent: 100, ticket: { ticket: "T", token: "P", book_token: "B", text: "ready" } }] };
+  };
+  const pouch = createTicketPouch({ api, language: "en", pollMs: 5, stallMs: 30 });
+  const res = await pouch.next(); assert.ok(res.ok); assert.equal(res.ticket.book_token, "B"); assert.equal(calls.filter((c) => c === "/api/draw").length, 1); pouch.stop();
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

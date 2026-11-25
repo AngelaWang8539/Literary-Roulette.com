@@ -15,6 +15,7 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 2, maxS
   const seenPassages = new Map();
   const info = { mode: "ocean", total: 0 };
 
+  const seed = (tokens) => { seenBooks = [...new Set([...(tokens || []).filter((t) => typeof t === "string" && t), ...seenBooks])].slice(-maxSeenBooks); };
   const rememberBook = (token) => { seenBooks = seenBooks.filter((t) => t !== token).concat(token).slice(-maxSeenBooks); };
   const passageSet = (bookToken) => { if (!seenPassages.has(bookToken)) seenPassages.set(bookToken, new Set()); return seenPassages.get(bookToken); };
   const known = () => new Set([current?.book_token, ...queue.map((t) => t.book_token), ...pending.keys()].filter(Boolean));
@@ -43,7 +44,7 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 2, maxS
       else if (r.state === "failed") pending.delete(r.handle);
       else {
         const next = { percent: r.percent === undefined ? p.percent : r.percent, stage: r.stage || p.stage, message: r.message || p.message, ahead: r.ahead || 0 };
-        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message) p.movedAt = Date.now();   // it moved: not stalled
+        if (next.percent !== p.percent || next.stage !== p.stage || next.message !== p.message || next.ahead < p.ahead) p.movedAt = Date.now();   // it moved (or the queue ahead shrank): not stalled
         Object.assign(p, next);
       }
     }
@@ -73,7 +74,13 @@ export function createTicketPouch({ api, language, batch = 3, lowWater = 2, maxS
     get waiting() { return pending.size; },
     get current() { return current; },
     refill, stop: stopBackground,
-    reset() { queue = []; seenBooks = []; seenPassages.clear(); pending.clear(); current = null; companion = null; stopBackground(); },
+    /** Remember books the reader met in earlier sessions (from My History) so they are not drawn again. Call before the first draw. */
+    seed,
+    get seenBooks() { return [...seenBooks]; },
+    /** Start over with an empty pouch. The reader's memory of books already met is KEPT: opening the catalogue again must not repeat them. */
+    reset() { queue = []; seenPassages.clear(); pending.clear(); current = null; companion = null; stopBackground(); },
+    /** Forget which books were met (the reader cleared their history). */
+    forget() { seenBooks = []; },
 
     /** The next different-book ticket. Waits (with progress callbacks) only if the pouch ran dry. While the
      *  catalogue is still being opened (first run) it waits and reports the real progress through onOpening. */

@@ -1,19 +1,22 @@
-"""Keeps the catalogue index fresh: download pg_catalog.csv.gz, read it, rebuild universe.sqlite, tell everyone how far along it is.
+"""Keeps the catalogue index fresh: download pg_catalog.csv.gz, validate it, update the Book Registry, rebuild universe.sqlite
+from the Registry, and tell everyone how far along it is. Also the one coordinator of the other background providers
+(top lists, Gutendex enrichment): each has its own schedule and timestamps, and one failing never blocks another.
 
 * The first run (no index yet) happens right away; the page shows the librarian's catalogue cart with this class's
   REAL progress (bytes downloaded, rows read).
 * After that the catalogue is refreshed in the background once a day; readers keep using the old index until the
   new one is complete (atomic swap).
-* A failed attempt is reported honestly and retried later; it never takes down reading.
+* A failed or REJECTED attempt (damaged, partial or suspicious file) is reported honestly and retried later; the Registry and
+  the live index keep their last good data. An unchanged file (same hash) rebuilds nothing.
 * Status is also written to a small JSON file, so a separate worker process and the web process agree.
 """
+import hashlib
 import json
 import logging
 import os
 import shutil
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 import catalogue_csv
@@ -33,7 +36,7 @@ def _parse_utc(text):
 
 class CatalogueSync:
     def __init__(self, runtime, status_path, *, csv_path=None, urls=catalogue_csv.CATALOG_URLS,
-                 opener=urllib.request.urlopen, max_age_hours=24.0, retry_seconds=300.0, clock=time.time):
+                 opener=None, max_age_hours=24.0, retry_seconds=300.0, clock=time.time):
         self.rt = runtime
         self.status_path = Path(status_path)
         self.lock_path = self.status_path.with_suffix(".lock")
@@ -102,45 +105,85 @@ class CatalogueSync:
                 return None
         return None
 
+    def _file_hash(self, path):
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def rebuild_index(self, progress=None):
+        """Rebuild universe.sqlite from the Registry's eligible books (no download). Used after every catalogue import and after an
+        admin activates or approves a book, because only a rebuild can ADD books to the index (pausing one takes effect at once)."""
+        rows = {language: list(self.rt.registry.eligible_rows(language)) for language in universe_mod.LANGUAGES}
+        counts = universe_mod.build(rows, self.rt.universe_path, blocked=self.rt.universe.blocked, log=log.info, progress=progress)
+        self.rt.universe.reload(force=True)
+        return counts
+
+    def rebuild_in_background(self):
+        threading.Thread(target=self._safe_rebuild, name="lr-rebuild", daemon=True).start()
+
+    def _safe_rebuild(self):
+        try:
+            self.rebuild_index()
+        except Exception:
+            log.exception("Index rebuild failed; the previous index stays live")
+
     def run(self):
-        """Download (or read the local copy), index, publish. Blocking. Returns True when a fresh index is live."""
+        """Download (or read the local copy), validate, update the Registry, rebuild the index. Blocking. True when a fresh index is live."""
         release = self._claim()
         if release is None:
             return False                                   # another process is already doing it
+        registry, run_id = self.rt.registry, None
         def progress(message, percent=None):
             self._set(state="running", running=True, message=message, percent=None if percent is None else int(percent), error=None)
+        def fresh(state, **kw):
+            registry.finish_run(run_id, state, generation=self.rt.universe.generated_at, **kw)
+            self._set(state="ready", running=False, percent=100, error=None, message="Gutenberg catalogue is up to date.")
+            return True
         try:
+            run_id = registry.start_run("gutenberg_csv")
             progress("Connecting to Project Gutenberg catalogue\u2026", 1)
             if self.csv_path and self.csv_path.exists():
                 path = self.csv_path
                 progress("Using your saved catalogue file\u2026", 55)
             else:
                 try:
-                    path = catalogue_csv.download(self.download_path, progress, urls=self.urls, opener=self.opener)
+                    options = {"opener": self.opener} if self.opener else {}
+                    path = catalogue_csv.download(self.download_path, progress, urls=self.urls, **options)
                 except catalogue_csv.NotModified:
                     if self.rt.universe.available:             # unchanged since last time: just record that it is fresh
                         universe_mod.touch(self.rt.universe_path)
                         self.rt.universe.reload(force=True)
-                        self._set(state="ready", running=False, percent=100, error=None,
-                                  message="Gutenberg catalogue is up to date.")
-                        return True
+                        return fresh("unchanged")
                     path = self.download_path                    # (index missing but the file is there: rebuild from it)
-            records = catalogue_csv.read_records(path, progress)
-            counts = universe_mod.build_from_records(records, self.rt.universe_path, blocked=self.rt.universe.blocked,
-                                                     log=log.info, progress=progress)
-            self.rt.universe.reload(force=True)
-            self.rt.attach_popularity()
+            digest = self._file_hash(path)
+            good = registry.last_run("gutenberg_csv", ("ok",))
+            if good and good["source_hash"] == digest and self.rt.universe.available and registry.count():
+                universe_mod.touch(self.rt.universe_path)        # same bytes as the last good import: nothing to rebuild
+                self.rt.universe.reload(force=True)
+                return fresh("unchanged", source_hash=digest)
+            stats = {}
+            records = catalogue_csv.read_records(path, progress, stats)
+            previous = dict(self.rt.universe.counts) if self.rt.universe.available else None
+            catalogue_csv.validate_records(records, stats, previous)               # raises ValidationError: nothing is replaced
+            progress("Updating the Book Registry\u2026", 78)
+            summary = registry.import_gutenberg(records, blocked=self.rt.universe.blocked)
+            counts = self.rebuild_index(progress)
             total = sum(counts.values())
+            registry.finish_run(run_id, "ok", records=len(records), completeness=1.0, generation=self.rt.universe.generated_at, source_hash=digest)
+            log.info("Registry import: %s", summary)
             self._set(state="ready", running=False, message=f"Gutenberg catalogue ready: {total:,} entries indexed.", percent=100, error=None)
             return True
         except Exception as exc:                           # report honestly, keep reading working, retry later
             log.warning("Catalogue sync failed: %s", exc)
+            rejected = isinstance(exc, catalogue_csv.ValidationError)
+            if run_id is not None:
+                registry.finish_run(run_id, "rejected" if rejected else "failed", error_class="validation" if rejected else type(exc).__name__, error=exc)
             self._set(state="failed", running=False, percent=None, error=str(exc),
-                      message="The catalogue could not be opened right now.")
+                      message="The catalogue could not be opened right now." if not rejected else "The new catalogue file was rejected; the previous one stays live.")
             return False
         finally:
-            if self.download_path.exists() and not (self.csv_path and self.csv_path.exists()):
-                pass                                       # keep the small .gz: a re-read after a crash needs no download
             release()
 
     # ---- background loop ---------------------------------------------------------------------
@@ -154,18 +197,36 @@ class CatalogueSync:
         self._stop.set()
 
     def _loop(self):
+        """One coordinator thread. Each provider task is independent: its own interval, its own recorded timestamps, its own
+        try/except. Returns to sleep for at most an hour."""
         while not self._stop.is_set():
             wait = self.max_age
-            try:
-                if getattr(self.rt, "popularity", None):       # best effort: the badge data refreshes about daily, never blocks anything
-                    self.rt.popularity.refresh_if_stale()
-                if self.needs_run():
-                    ok = self.run()
-                    wait = self.max_age if ok else self.retry_seconds
-                else:
-                    age = self.age_seconds() or 0
-                    wait = max(60.0, self.max_age - age)
-            except Exception:
-                log.exception("Catalogue loop error")
-                wait = self.retry_seconds
-            self._stop.wait(min(wait, 3600))
+            for task in (self._task_scores, self._task_catalogue, self._task_gutendex, self._task_housekeeping):
+                try:
+                    wait = min(wait, task())
+                except Exception:
+                    log.exception("Coordinator task %s failed", task.__name__)
+                    wait = min(wait, self.retry_seconds)
+            self._stop.wait(min(max(wait, 30.0), 3600))
+
+    def _task_scores(self):
+        if getattr(self.rt, "popularity", None):              # best effort: the badge data refreshes about daily, never blocks anything
+            self.rt.popularity.refresh_if_stale()
+        return 3600.0
+
+    def _task_catalogue(self):
+        if self.needs_run():
+            return self.max_age if self.run() else self.retry_seconds
+        return max(60.0, self.max_age - (self.age_seconds() or 0))
+
+    def _task_gutendex(self):
+        provider = getattr(self.rt, "gutendex", None)
+        if provider is None or not provider.enabled or not self.rt.universe.available:
+            return 3600.0
+        if provider.due():
+            provider.run()
+        return provider.interval
+
+    def _task_housekeeping(self):
+        self.rt.registry.prune()
+        return 24 * 3600.0

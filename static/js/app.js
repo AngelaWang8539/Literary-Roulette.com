@@ -133,7 +133,8 @@ async function drawWhenReady(op) {
     },
     onNotice: (text) => setStatus(text, "note"),
   });
-  if (res.ok && pouch.info.mode === "starter") setTimeout(() => setStatus("The catalogue could not be opened, so this is a book from the small starter shelf. The librarian keeps trying.", "note"), 0);
+  if (res.ok && res.ticket?.fallback) setTimeout(() => setStatus("The librarian is very busy, so this passage comes from the ready shelf: a smaller sample of the catalogue.", "note"), 0);
+  else if (res.ok && pouch.info.mode === "starter") setTimeout(() => setStatus("The catalogue could not be opened, so this is a book from the small starter shelf. The librarian keeps trying.", "note"), 0);
   return res;
 }
 
@@ -187,7 +188,7 @@ function showPassage(p, { record = true } = {}) {
     counts.passages++; updateCounts();
     if (p.source === "catalogue" && p.raw) { pouch.shown(p.raw); logEvent("passage_displayed"); ocean.met.add(p.bookKey); renderOcean(); }
     ready.then(async () => {
-      await lib.addHistory({ source: p.source, bookKey: p.bookKey, passageKey: p.passageKey, text: p.text });
+      await lib.addHistory({ source: p.source, bookKey: p.bookKey, passageKey: p.passageKey, text: p.text, language: LANGUAGE });
       if (p.book) await lib.markBookRevealed(p.source, p.bookKey, p.book);
     }).catch(() => {});
   }
@@ -446,7 +447,28 @@ hist.q.addEventListener("input", renderHistory);
 hist.f.addEventListener("change", renderHistory);
 $("h-clear").addEventListener("click", async () => {
   await ready;
-  if (confirm("Clear your whole reading history on this device? This cannot be undone.")) { await lib.clearHistory(); renderHistory(); }
+  if (confirm("Clear your whole reading history on this device? This cannot be undone.")) { await lib.clearHistory(); pouch.forget(); renderHistory(); }
+});
+$("h-export").addEventListener("click", async () => {
+  await ready;
+  const data = await lib.exportData();
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: `literary-roulette-history-${new Date().toISOString().slice(0, 10)}.json` });
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setStatus("History exported. Keep the file somewhere safe: it is how you bring this history back on this or another device.");
+});
+$("h-import").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  await ready;
+  try {
+    if (file.size > 5 * 1024 * 1024) throw new Error("That file is too large to be a history export.");
+    const done = await lib.importData(JSON.parse(await file.text()));
+    pouch.seed(await lib.recentBooks({ source: "catalogue", language: LANGUAGE }));
+    renderHistory();
+    setStatus(`Restored ${done.history} passage${done.history === 1 ? "" : "s"} and ${done.saved} saved book${done.saved === 1 ? "" : "s"}.`);
+  } catch (err) { setStatus((err && err.message) || "That file could not be restored.", "error"); }
 });
 
 // ---------- My Saved Books ----------
@@ -543,6 +565,10 @@ function route() {
 }
 addEventListener("hashchange", route);
 route();
-oceanReady = loadOcean();
-startCatalogue();
 window.__lrReady = true;
+(async () => {
+  await ready;                                   // restore the books this reader met recently BEFORE the first draw, so none comes back
+  try { pouch.seed(await lib.recentBooks({ source: "catalogue", language: LANGUAGE })); } catch { /* storage trouble: draw without history */ }
+  oceanReady = loadOcean();
+  startCatalogue();
+})();

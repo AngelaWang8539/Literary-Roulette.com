@@ -100,7 +100,10 @@
     <label>Search<input id="h-query" type="search" placeholder="Words from a passage"></label>
     <label>Show<select id="h-filter"><option value="all">All passages</option><option value="revealed">Book revealed</option><option value="hidden">Book not revealed</option></select></label>
     <button id="h-clear" class="btn quiet" type="button">Clear all history</button>
+    <button id="h-export" class="btn quiet" type="button">Export my history</button>
+    <label class="btn quiet">Restore from a file<input id="h-import" type="file" accept="application/json,.json" hidden></label>
   </div>
+  <p class="meta">Export saves a file you keep yourself, for when this browser's storage is cleared. It is not a sync: nothing is uploaded and other devices are not updated until you restore the file there.</p>
   <p id="h-count" class="meta" role="status"></p>
   <ul id="h-list" class="cards"></ul>
   <p id="h-empty" class="meta" hidden>Nothing here yet. Spin a passage and it will appear in your history.</p>

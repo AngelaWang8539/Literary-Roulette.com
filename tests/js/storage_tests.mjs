@@ -39,14 +39,54 @@ await test("a newer database that lacks a store is repaired too", async () => {
   const f = fresh(); await seed(f, 9, ["history"]);
   const a = idbAdapter(f); await a.put("saved", { id: "x" }); assert.equal((await a.getAll("saved")).length, 1);
 });
-await test("history is capped at 75 and keeps the newest", async () => {
-  assert.equal(HISTORY_LIMIT, 75);
+await test("history is capped at 70 and keeps the newest", async () => {
+  assert.equal(HISTORY_LIMIT, 70);
   let clock = 1000, n = 0;
   const lib = createLibrary(idbAdapter(fresh()), { now: () => ++clock, uid: () => "id" + (++n) });
   for (let i = 0; i < 90; i++) await lib.addHistory({ source: "catalogue", bookKey: "b", passageKey: "p" + i, text: "t" + i });
-  const rows = await lib.listHistory(); assert.equal(rows.length, 75);
+  const rows = await lib.listHistory(); assert.equal(rows.length, 70);
   assert.ok(rows.some((r) => r.passageKey === "p89")); assert.ok(!rows.some((r) => r.passageKey === "p0"));
 });
 
+await test("a recorded language and the recent books: distinct, oldest first, only this language", async () => {
+  let clock = 1000, n = 0;
+  const lib = createLibrary(idbAdapter(fresh()), { now: () => ++clock, uid: () => "id" + (++n) });
+  await lib.addHistory({ source: "catalogue", bookKey: "A", passageKey: "p1", text: "t", language: "en" });
+  await lib.addHistory({ source: "catalogue", bookKey: "B", passageKey: "p2", text: "t", language: "fr" });
+  await lib.addHistory({ source: "catalogue", bookKey: "A", passageKey: "p3", text: "t", language: "en" });   // same book again
+  await lib.addHistory({ source: "catalogue", bookKey: "C", passageKey: "p4", text: "t" });                    // saved before languages were recorded
+  await lib.addHistory({ source: "upload", bookKey: "U", passageKey: "p5", text: "t", language: "en" });
+  assert.deepEqual(await lib.recentBooks({ source: "catalogue", language: "en" }), ["A", "C"]);   // B is French; A counted once, newest position
+  assert.deepEqual(await lib.recentBooks({ source: "catalogue", language: "fr" }), ["B", "C"]);
+});
+await test("the recent books never exceed the history that is kept (70)", async () => {
+  let clock = 1000, n = 0;
+  const lib = createLibrary(idbAdapter(fresh()), { now: () => ++clock, uid: () => "id" + (++n) });
+  for (let i = 0; i < 90; i++) await lib.addHistory({ source: "catalogue", bookKey: "b" + i, passageKey: "p" + i, text: "t", language: "en" });
+  const keys = await lib.recentBooks({ source: "catalogue", language: "en" });
+  assert.equal(keys.length, 70); assert.equal(keys[69], "b89"); assert.equal(keys[0], "b20");
+});
+await test("export then restore brings history and saved books back, and nothing else", async () => {
+  let clock = 1000, n = 0;
+  const a = createLibrary(idbAdapter(fresh()), { now: () => ++clock, uid: () => "a" + (++n) });
+  await a.addHistory({ source: "catalogue", bookKey: "A", passageKey: "p1", text: "hello", language: "en" });
+  await a.addHistory({ source: "upload", bookKey: "U", passageKey: "p2", text: "private upload text" });
+  await a.markBookRevealed("catalogue", "A", { title: "T", author: "X" });
+  await a.saveBook({ source: "catalogue", bookKey: "A", title: "T", author: "X", genres: ["g"], description: "d", links: [] });
+  const file = JSON.parse(JSON.stringify(await a.exportData()));
+  assert.equal(file.history.length, 1); assert.ok(!JSON.stringify(file).includes("private upload"));   // uploads never leave the device
+  const b = createLibrary(idbAdapter(fresh()), { now: () => ++clock, uid: () => "b" + (++n) });
+  assert.deepEqual(await b.importData(file), { history: 1, saved: 1 });
+  const rows = await b.listHistory(); assert.equal(rows[0].text, "hello"); assert.equal(rows[0].title, "T");
+  assert.ok(await b.isSaved("catalogue", "A"));
+});
+await test("a restore file that is not ours, or has bad entries, is refused or skipped safely", async () => {
+  const lib = createLibrary(idbAdapter(fresh()));
+  await assert.rejects(lib.importData({ app: "something-else", history: [] }));
+  await assert.rejects(lib.importData(null));
+  const done = await lib.importData({ app: "literary-roulette", history: [{ source: "catalogue", bookKey: "x".repeat(200), passageKey: "p", text: "t", ts: 1 },
+    { source: "catalogue", bookKey: "ok", passageKey: "p", text: "t", ts: 5 }, "junk", { source: "upload", bookKey: "u", passageKey: "p", text: "t", ts: 1 }], saved: [{ source: "catalogue" }] });
+  assert.deepEqual(done, { history: 1, saved: 0 });
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

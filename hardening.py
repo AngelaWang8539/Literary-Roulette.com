@@ -9,9 +9,11 @@ Everything is switched by environment variables, so local development stays exac
     LR_CSP=report|enforce|off   default "report": violations are only logged in the browser Console, nothing breaks
     LR_RATE_EVENT=120      /api/event requests per minute per visitor (0 = off)
     LR_RATE_API=240        all other /api/ requests per minute per visitor (0 = off)
+    LR_RATE_ADMIN=60       /api/admin/ requests per minute per address (0 = off); admin also needs LR_ADMIN_TOKEN
 The rate limiter lives in each server process. It is a seatbelt; the real limit belongs at the proxy or CDN.
 """
 import os
+import threading
 import time
 from collections import deque
 
@@ -24,6 +26,34 @@ def _int(name, default):
         return int(os.environ.get(name, default))
     except ValueError:
         return default
+
+
+class Metrics:
+    """Counters and bounded latency samples: what the load-test gates need (queue depth comes from the worker, the rest from here)."""
+
+    def __init__(self, samples=2000):
+        self._lock, self._samples, self.started = threading.Lock(), samples, time.time()
+        self.counts, self._lat = {}, {}
+
+    def incr(self, name, n=1):
+        with self._lock:
+            self.counts[name] = self.counts.get(name, 0) + n
+
+    def observe(self, name, seconds):
+        with self._lock:
+            self._lat.setdefault(name, deque(maxlen=self._samples)).append(seconds)
+
+    def snapshot(self):
+        with self._lock:
+            counts, lat = dict(self.counts), {k: sorted(v) for k, v in self._lat.items()}
+        out = {}
+        for name, values in lat.items():
+            pick = lambda q: round(values[min(len(values) - 1, int(q * len(values)))] * 1000, 1)
+            out[name] = {"n": len(values), "p50_ms": pick(0.50), "p95_ms": pick(0.95)}
+        return {"counts": counts, "latency": out, "uptime_seconds": round(time.time() - self.started)}
+
+
+TIMED = {"/api/draw": "draw", "/api/draw/poll": "poll", "/api/book/reveal": "reveal", "/api/passage/another": "another"}
 
 
 class RateLimiter:
@@ -49,9 +79,14 @@ class RateLimiter:
         return True, 0
 
 
-def apply(app, env=os.environ):
-    from flask import jsonify, request
+def apply(app, env=os.environ, metrics=None):
+    from flask import g, jsonify, request
     production = env.get("LR_PRODUCTION") == "1"
+    if production and not env.get("LR_SECRET_KEY"):
+        app.logger.warning("LR_PRODUCTION=1 without LR_SECRET_KEY: the signing key lives in instance/secret.key, so every redeploy on a "
+                           "disk that is not kept would invalidate readers' saved history keys and open tickets. Set LR_SECRET_KEY.")
+    metrics = metrics or Metrics()
+    app.extensions["lr_metrics"] = metrics
 
     # 1) cookies: never readable by scripts, not sent on cross-site requests, https-only in production
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=production)
@@ -69,7 +104,7 @@ def apply(app, env=os.environ):
     # 4) rate limits
     limiter = RateLimiter()
     app.extensions["lr_limiter"] = limiter
-    rate_event, rate_api = int(env.get("LR_RATE_EVENT", 120)), int(env.get("LR_RATE_API", 240))
+    rate_event, rate_api, rate_admin = int(env.get("LR_RATE_EVENT", 120)), int(env.get("LR_RATE_API", 240)), int(env.get("LR_RATE_ADMIN", 60))
 
     @app.before_request
     def _limit():
@@ -81,7 +116,11 @@ def apply(app, env=os.environ):
             resp = jsonify(ok=False, code="too_large", message="That request is too large.")
             resp.status_code = 413
             return resp
-        bucket, limit = ("event", rate_event) if path == "/api/event" else ("api", rate_api)
+        g.lr_t0 = time.perf_counter() if path in TIMED else None
+        if path.startswith("/api/admin/"):
+            bucket, limit = "admin", rate_admin
+        else:
+            bucket, limit = ("event", rate_event) if path == "/api/event" else ("api", rate_api)
         ok, wait = limiter.allow((request.remote_addr or "?", bucket), limit)
         if ok:
             return None
@@ -103,6 +142,11 @@ def apply(app, env=os.environ):
             h.setdefault("Content-Security-Policy", CSP)
         elif csp_mode == "report":
             h.setdefault("Content-Security-Policy-Report-Only", CSP)
+        if request.path.startswith(("/admin/", "/api/admin/")):
+            h["Cache-Control"], h["X-Robots-Tag"] = "no-store", "noindex, nofollow"
+        started = g.get("lr_t0")
+        if started is not None and request.path in TIMED:
+            metrics.observe(TIMED[request.path], time.perf_counter() - started)
         if request.is_secure and production:
             h.setdefault("Strict-Transport-Security", "max-age=31536000")
         return resp

@@ -152,7 +152,8 @@ class Catalogue:
     def unregister_external(self, bid):
         """Forget a retired on-demand title so nothing piles up."""
         with self._lock:
-            if bid in self.books and bid not in self.local_texts and self.books[bid].get("text_url"):
+            if bid in self.books and bid not in self.local_texts and (
+                    self.books[bid].get("text_url") or self.books[bid].get("provider") == "author"):
                 self.books.pop(bid, None)
                 token = self._id_tokens.pop(bid, None)
                 self._b_tokens.pop(token, None)

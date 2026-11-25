@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Registry Center · Literary Roulette</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Registry Center</h1>
+    <nav id="tabs" aria-label="Sections">
+      <button data-tab="books" class="on">Books</button>
+      <button data-tab="imports">Imports</button>
+      <button data-tab="sources">Sources &amp; Sync</button>
+    </nav>
+    <form id="login" autocomplete="off">
+      <input id="token" type="password" placeholder="Admin token" aria-label="Admin token">
+      <button type="submit">Unlock</button>
+    </form>
+  </header>
+  <p id="note" role="status"></p>
+  <section id="summary"></section>
+  <section id="tab-books">
+    <form id="filters">
+      <input id="q" type="search" placeholder="Title, author or id">
+      <select id="f-language"><option value="">Any language</option><option>en</option><option>fr</option><option>zh</option></select>
+      <select id="f-pool"><option value="">Any pool status</option><option>active</option><option>pending</option><option>paused</option><option>archived</option><option>starter</option></select>
+      <select id="f-rights"><option value="">Any rights status</option><option>public_domain_candidate</option><option>pending_verification</option><option>approved</option><option>source_licensed</option><option>paused</option><option>withdrawn</option></select>
+      <button type="submit">Search</button>
+    </form>
+    <div class="scroll"><table id="books"></table></div>
+  </section>
+  <section id="tab-imports" hidden>
+    <p class="hint">Independent-author TXT files arrive through <code>python tools/registry_admin.py intake</code>. Passing the checks does not license a book: review the evidence, approve the rights, then activate.</p>
+    <div class="scroll"><table id="imports"></table></div>
+  </section>
+  <section id="tab-sources" hidden>
+    <div class="scroll"><table id="sources"></table></div>
+    <p class="actions"><button data-run="catalogue">Sync catalogue now</button> <button data-run="gutendex">Run Gutendex batch now</button> <button data-run="scores">Refresh top lists now</button></p>
+  </section>
+  <script src="{{ url_for('static', filename='js/registry-center.js') }}" defer></script>
+</body>
+</html>

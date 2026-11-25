@@ -395,7 +395,7 @@ class UniverseTests(unittest.TestCase):
             self.assertEqual([c["gutenberg_id"] for c in u.random_candidates("en", 1, random.Random(seed))] or [1019], [1019])
 
     def test_csv_catalogue_carries_no_popularity_so_no_badge(self):
-        self.assertIsNone(self.build(en=5).get("en", 1002)["popularity"])
+        self.assertIsNone(self.build(en=5).get("en", 1002).get("popularity"))
 
 
 class SyncTests(unittest.TestCase):
@@ -503,6 +503,7 @@ class OceanTests(OceanBase):
             self.assertNotRegex(json.dumps(r["ticket"]), r"Title \d+")
 
     def test_picks_span_the_whole_catalogue_not_a_small_shelf(self):
+        self.rt.worker.settings.queue_cap = 10 ** 6                              # nothing is prepared in this test: do not let the bound end it
         gids = set()
         for _ in range(60):
             for p in self.post("/api/draw", count=5)["pending"]:
@@ -537,6 +538,8 @@ class OceanTests(OceanBase):
         res = self.post("/api/draw", count=3)
         self.assertGreaterEqual(res["shed"], 1); self.assertGreaterEqual(len(res["tickets"]), 1)
         self.assertTrue(all(t["text"] for t in res["tickets"]))
+        self.assertEqual(res["fallback"], {"kind": "ready_shelf", "reason": "busy", "temporary": True})     # never silent
+        self.assertTrue(any(t.get("fallback") for t in res["tickets"]))
 
     def test_estimated_wait_follows_the_queue(self):
         w = self.rt.worker; w.settings.min_interval = 2.0
@@ -574,8 +577,9 @@ class OceanTests(OceanBase):
         self.assertEqual((info["mode"], info["total"]), ("ocean", 800)); self.assertEqual(info["totals"]["fr"], 60)
         self.assertEqual(info["catalogue"]["state"], "ready")
 
-    def test_history_is_capped_at_75(self):
-        self.assertIn("HISTORY_LIMIT = 75", Path("static/js/storage.js").read_text(encoding="utf-8"))
+    def test_history_is_capped_at_70_and_records_the_language(self):
+        self.assertIn("HISTORY_LIMIT = 70", Path("static/js/storage.js").read_text(encoding="utf-8"))
+        self.assertIn("language: LANGUAGE", Path("static/js/app.js").read_text(encoding="utf-8"))
 
     def test_poll_shows_bytes_when_the_size_is_unknown_and_the_queue_position_while_waiting(self):
         res = self.post("/api/draw", count=3); handles = [p["handle"] for p in res["pending"]]
@@ -769,7 +773,7 @@ class PopularityTests(OceanBase):
         opener = lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html")
         self.assertTrue(pop.refresh(opener=opener))
         self.assertEqual(pop.payload("en", 2000)["tier"], "jackpot"); self.assertEqual(pop.payload("en", 2050)["tier"], "lucky")
-        gem = pop.payload("en", 99999); self.assertEqual(gem["tier"], "hidden-gem"); self.assertIsNone(gem["rank"])
+        gem = pop.payload("en", 99999); self.assertEqual(gem["tier"], "offlist"); self.assertIsNone(gem["rank"])   # absence from a top list is never a bottom-10% claim
         self.assertIn("popularity, not literary quality", gem["note"])
 
     def test_the_long_tail_gets_varied_honest_lines_from_the_catalogue_percentile(self):
@@ -786,7 +790,7 @@ class PopularityTests(OceanBase):
             got = pop.payload("en", 7, deep={**deep, "tier": tier}); self.assertEqual(got["tier"], tier); self.assertTrue(got["short"]); self.assertLessEqual(len(got["short"]), 24)
         pop.refresh(opener=lambda req, timeout: SourceTests.Resp(top_page(range(2000, 2100)).encode(), "text/html"))
         self.assertEqual(pop.payload("en", 2003, deep=deep)["tier"], "jackpot")                  # the public monthly list outranks the percentile
-        self.assertEqual(pop.payload("en", 99999)["tier"], "hidden-gem"); self.assertIn("top 100", pop.payload("en", 99999)["label"])   # no percentile: no claim about the bottom 10%
+        self.assertEqual(pop.payload("en", 99999)["tier"], "offlist"); self.assertIn("top 100", pop.payload("en", 99999)["label"])   # no percentile: no claim about the bottom 10%
 
     def test_a_failed_refresh_keeps_the_last_good_data_and_says_why(self):
         import popularity, urllib.error
