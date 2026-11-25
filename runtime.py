@@ -1,4 +1,4 @@
-"""Builds the shared pieces (catalogues, universe, lake/shelf, worker) for the web app and worker.py."""
+"""Builds the shared pieces (Registry, catalogues, universe, lake/shelf, worker, providers) for the web app and worker.py."""
 import logging
 import os
 import secrets
@@ -8,8 +8,12 @@ import time
 from pathlib import Path
 
 import catalogue_sync
+import fetchguard
+import gutendex as gutendex_mod
+import intake
 import popularity as popularity_mod
 import prep
+import registry as registry_mod
 import universe as universe_mod
 from library import Catalogue, load_json_list, load_manifest
 from shelf import ReadyShelf
@@ -44,7 +48,7 @@ def settings_from_env(overrides=None):
     env, kw = os.environ, {}
     names = {"LR_FIRST_WAVE": "first_wave", "LR_MAX_WAVE": "max_wave", "LR_PREP_WORKERS": "workers",
              "LR_SOURCE_CONCURRENCY": "source_concurrency", "LR_SOURCE_MIN_INTERVAL": "min_interval",
-             "LR_PREP_CHECK_SECONDS": "check_interval", "LR_MAX_COLD_WAIT": "max_cold_wait"}
+             "LR_PREP_CHECK_SECONDS": "check_interval", "LR_MAX_COLD_WAIT": "max_cold_wait", "LR_QUEUE_CAP": "queue_cap"}
     for var, key in names.items():
         if env.get(var):
             kw[key] = env[var]
@@ -62,6 +66,7 @@ class Runtime:
         base = Path(config["BASE_DIR"])
         data_dir, instance_dir = Path(config["DATA_DIR"]), Path(config["INSTANCE_DIR"])
         self.secret = load_secret(instance_dir)
+        self.registry = registry_mod.Registry(Path(config.get("REGISTRY_PATH") or instance_dir / "registry.sqlite"))
         self.shelf_dir = Path(config.get("SHELF_DIR") or instance_dir / "ready")
         self.problems, self.catalogues = [], {}
         for language in LANGUAGES:
@@ -80,9 +85,16 @@ class Runtime:
             # A prebuilt index shipped with the project: the very first open is already the ocean.
             self.universe_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.universe_path.with_name(self.universe_path.name + ".seed.tmp")
-            shutil.copyfile(self.seed_path, tmp)
+            universe_mod.upgrade_index(self.seed_path, tmp)          # copies, converting an older index layout without any network
             os.replace(tmp, self.universe_path)
-        self.universe = universe_mod.Universe(self.universe_path, config.get("BLOCKLIST_PATH") or data_dir / "blocklist.json")
+        if self.registry.count() == 0 and self.universe_path.exists():
+            try:                                                      # first start: the Registry begins with what the index already holds
+                self.registry.import_index_rows(universe_mod.index_rows(self.universe_path))
+            except Exception:
+                log.exception("Could not bootstrap the Registry from the index; the next catalogue sync will fill it")
+        for language, cat in self.catalogues.items():
+            self.registry.import_local_books(language, cat.all_books(), {bid: {"verified": True, "text_sha256": info["sha256"]} for bid, info in cat.local_texts.items()})
+        self.universe = universe_mod.Universe(self.universe_path, config.get("BLOCKLIST_PATH") or data_dir / "blocklist.json", self.registry)
         self._build_lock = threading.Lock()
         self.shelf = ReadyShelf(self.shelf_dir, tuple(LANGUAGES))
         self._synced_version, self._cache = -1, {}
@@ -91,15 +103,21 @@ class Runtime:
             self.seed_gids[language] = {int(b["gutenberg_id"]): b["id"] for b in cat.all_books()
                                         if str(b.get("gutenberg_id") or "").isdigit() and b["id"] in cat.local_texts}
         self.sync_external()
-        self.attach_popularity()
         self.status_path = instance_dir / "catalogue_status.json"
         self.csv_override = config.get("CATALOG_CSV") or os.environ.get("LR_CATALOG_CSV")
         self.max_age_hours = float(config.get("CATALOGUE_MAX_AGE_HOURS", 24))
-        self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json")
         self.sync = None
         self.settings = settings_from_env(config.get("PREP_SETTINGS"))
+        env = os.environ
+        self.guards = fetchguard.make_guards(self.shelf_dir / ".gate", min_interval=self.settings.min_interval)   # same gate as book downloads
+        self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json", guard=self.guards["gutenberg"], registry=self.registry)
+        self.text_store = intake.TextStore(Path(config.get("AUTHOR_TEXTS_DIR") or instance_dir / "registry" / "texts"))
+        self.gutendex = gutendex_mod.Gutendex(
+            self.registry, self.guards["gutendex"], prefer=self.gutendex_targets, enabled=env.get("LR_GUTENDEX", "1") != "0",
+            per_run=int(env.get("LR_GUTENDEX_PER_RUN", 160)), interval=float(env.get("LR_GUTENDEX_HOURS", 6)) * 3600,
+            census=env.get("LR_GUTENDEX_CENSUS") == "1")
         self.worker = prep.PrepWorker(self.shelf, self.catalogues, self.universe, self.shelf_dir, self.settings,
-                                      fetcher=config.get("FETCHER"))
+                                      fetcher=config.get("FETCHER"), registry=self.registry, text_store=self.text_store)
         self.sync = self.make_sync(**(config.get("SYNC_KWARGS") or {}))
         self.offline_starter = bool(config.get("OFFLINE_STARTER", False))
 
@@ -108,16 +126,12 @@ class Runtime:
         return catalogue_sync.CatalogueSync(self, self.status_path, csv_path=self.csv_override,
                                             max_age_hours=self.max_age_hours, **kw)
 
-    def attach_popularity(self):
-        if not self.universe.available:
-            return
-        for language, cat in self.catalogues.items():
-            for book in cat.all_books():
-                gid = book.get("gutenberg_id")
-                if str(gid or "").isdigit() and not book.get("text_url"):
-                    pop = self.universe.popularity(language, int(gid))
-                    if pop:
-                        book["popularity"] = pop
+    def gutendex_targets(self):
+        """Gutenberg ids worth a fresh Gutendex look first: books in the library and on Gutenberg's top lists."""
+        ids = set(self.popularity.listed_ids())
+        for language in LANGUAGES:
+            ids.update(g for g in map(prep._gutenberg_id, self.shelf.external_ids(language)) if g)
+        return ids
 
     # ---- what can be served ------------------------------------------------------------------
     def sync_external(self):
@@ -161,12 +175,14 @@ class Runtime:
             return "starter"
         return "opening"
 
-    def ready_book_id(self, language, gid):
-        """Book id if this exact edition is already prepared (in the lake or a starter), else None."""
-        bid = f"pg-{language}-{int(gid)}"
+    def ready_book_id(self, language, ref):
+        """Book id if this exact edition is already prepared (in the lake or a starter), else None. `ref` is a drawn record
+        (any provider) or a Gutenberg number."""
+        gid = ref.get("gutenberg_id") if isinstance(ref, dict) else ref
+        bid = ref["id"] if isinstance(ref, dict) else f"pg-{language}-{int(ref)}"
         if self.shelf.has(language, bid) and bid in self.catalogues[language].books:
             return bid
-        seed = self.seed_gids[language].get(int(gid))
+        seed = self.seed_gids[language].get(int(gid)) if gid else None
         return seed if seed and self.shelf.has(language, seed) and seed in self.catalogues[language].books else None
 
     def ready_counts(self):

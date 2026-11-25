@@ -9,6 +9,7 @@ const cases = [
   [{ tier: "lucky", label: "x", rank: 40 }, "Top 100 this month"],
   [{ tier: "hidden-gem", label: "x", top_percent: 95, rank: 900 }, "Last 10%"],
   [{ tier: "hidden-gem", label: "x" }, "Off the list"],
+  [{ tier: "offlist", label: "x" }, "Off the list"],
   [{ tier: "discovery", label: "x", top_percent: 50 }, "Discovery"],
   [{ tier: "something-new", label: "x" }, "Discovery"],
 ];

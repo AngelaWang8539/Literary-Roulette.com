@@ -1,7 +1,7 @@
 // Everything the reader keeps in THIS browser: history, saved books, uploaded books.
 // It uses IndexedDB. Nothing here is sent to the server and nothing syncs between devices.
 const STORES = ["history", "saved", "uploads"];
-export const HISTORY_LIMIT = 75;   // history never piles up: the 75 most recent passages are kept
+export const HISTORY_LIMIT = 70;   // history never piles up: the 70 most recent passages are kept (and the books among them are not drawn again)
 
 const DB_NAME = "literary-roulette", SCHEMA_VERSION = 2;
 
@@ -77,8 +77,8 @@ export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = 
   };
   const lib = {
     // ---- reading history ----
-    async addHistory({ source, bookKey, passageKey, text }) {
-      const entry = { id: uid(), ts: now(), source, bookKey, passageKey, text, revealed: false, title: null, author: null };
+    async addHistory({ source, bookKey, passageKey, text, language = null }) {
+      const entry = { id: uid(), ts: now(), source, bookKey, passageKey, text, language, revealed: false, title: null, author: null };
       await db.put("history", entry);
       await trimHistory();
       return entry;
@@ -96,6 +96,18 @@ export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = 
         return hay.includes(q);
       });
     },
+    /** Distinct book keys of the recent history, OLDEST first (the order the pouch keeps them in), for one source and language.
+     *  Entries saved before the language was recorded still count: a key that belongs to another language never matches anyway. */
+    async recentBooks({ source = "catalogue", language = null, limit = HISTORY_LIMIT } = {}) {
+      const all = (await db.getAll("history")).sort((a, b) => b.ts - a.ts || (a.id < b.id ? 1 : -1));
+      const keys = [];
+      for (const e of all) {
+        if (e.source !== source || !e.bookKey || (language && e.language && e.language !== language)) continue;
+        if (!keys.includes(e.bookKey)) keys.push(e.bookKey);
+        if (keys.length >= limit) break;
+      }
+      return keys.reverse();
+    },
     async markBookRevealed(source, bookKey, { title, author }) {
       for (const e of await db.getAll("history")) {
         if (e.source === source && e.bookKey === bookKey && !e.revealed) await db.put("history", { ...e, revealed: true, title, author });
@@ -106,6 +118,34 @@ export function createLibrary(db, { now = () => Date.now(), uid = defaultId } = 
     },
     removeHistory: (id) => db.remove("history", id),
     clearHistory: () => db.clear("history"),
+
+    // ---- export / restore: a file the reader keeps, for when this browser's storage is cleared. Not a sync. ----
+    // Catalogue history and saved books only: uploaded books stay on the device they were added on.
+    async exportData() {
+      const history = (await db.getAll("history")).filter((e) => e.source === "catalogue");
+      const saved = (await db.getAll("saved")).filter((e) => e.source === "catalogue");
+      return { app: "literary-roulette", version: 1, exportedAt: now(), history, saved };
+    },
+    async importData(data) {
+      if (!data || data.app !== "literary-roulette" || !Array.isArray(data.history) || !Array.isArray(data.saved || [])) throw new Error("This is not a Literary Roulette history file.");
+      const str = (v, max) => typeof v === "string" && v.length <= max;
+      let history = 0, saved = 0;
+      for (const e of data.history.slice(0, HISTORY_LIMIT)) {
+        if (!e || e.source !== "catalogue" || !str(e.bookKey, 60) || !str(e.passageKey, 60) || !str(e.text, 6000) || !Number.isFinite(e.ts)) continue;
+        await db.put("history", { id: str(e.id, 80) ? e.id : uid(), ts: e.ts, source: "catalogue", bookKey: e.bookKey, passageKey: e.passageKey, text: e.text,
+          language: str(e.language, 8) ? e.language : null, revealed: e.revealed === true, title: str(e.title, 300) ? e.title : null, author: str(e.author, 300) ? e.author : null });
+        history++;
+      }
+      for (const b of (data.saved || []).slice(0, 500)) {
+        if (!b || b.source !== "catalogue" || !str(b.bookKey, 60) || !str(b.title, 300) || !str(b.author, 300)) continue;
+        await db.put("saved", { source: "catalogue", bookKey: b.bookKey, title: b.title, author: b.author, genres: Array.isArray(b.genres) ? b.genres.filter((g) => str(g, 80)).slice(0, 8) : [],
+          description: str(b.description, 2000) ? b.description : "", links: Array.isArray(b.links) ? b.links.slice(0, 6) : [], credit: b.credit || null, isUpload: false, isDemo: b.isDemo === true,
+          contentNote: str(b.contentNote, 300) ? b.contentNote : null, id: lib.savedId("catalogue", b.bookKey), savedAt: Number.isFinite(b.savedAt) ? b.savedAt : now() });
+        saved++;
+      }
+      await trimHistory();
+      return { history, saved };
+    },
 
     // ---- saved books ----
     savedId: (source, bookKey) => `${source}:${bookKey}`,

@@ -10,7 +10,9 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+import fetchguard
 import textproc
+from fetchguard import RateGate, SharedRateGate  # noqa: F401  (re-exported: prep.py and tests import them from here)
 
 START_RE = re.compile(r"\*{3,}\s*START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\*{3,}", re.I)
 END_RE = re.compile(r"\*{3,}\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK", re.I)
@@ -18,12 +20,14 @@ MIN_CHARS = {"zh": 300}
 DEFAULT_MIN_CHARS = 500
 CONNECT_TIMEOUT = 8          # seconds to connect / to wait for any silent server before trying the next address
 TOTAL_DEADLINE = 45         # one download attempt never runs longer than this, however slowly it trickles
-USER_AGENT = "LiteraryRoulette/0.6 (background text preparation; contact via the site's About page)"
+MAX_TEXT_BYTES = 60_000_000    # the longest real book is well below this; anything bigger is not a book
+USER_AGENT = fetchguard.user_agent()
 
 
 class SourceError(Exception):
     """Base class. `permanent` tells the worker whether retrying can ever help."""
     permanent = False
+    retry_after = None           # seconds the server asked us to wait (Retry-After), if it said
 
 
 class PermanentSourceError(SourceError):
@@ -32,54 +36,6 @@ class PermanentSourceError(SourceError):
 
 class TransientSourceError(SourceError):
     permanent = False
-
-
-class RateGate:
-    """Keeps a minimum gap between downloads across all worker threads."""
-
-    def __init__(self, min_interval=1.5, clock=time.monotonic, sleep=time.sleep):
-        self.min_interval, self._clock, self._sleep = float(min_interval), clock, sleep
-        self._next, self._lock = 0.0, threading.Lock()
-
-    def wait(self):
-        with self._lock:
-            now = self._clock()
-            delay = max(0.0, self._next - now)
-            self._next = max(now, self._next) + self.min_interval
-        if delay:
-            self._sleep(delay)
-
-
-class SharedRateGate:
-    """A RateGate that holds across processes on one machine (several Gunicorn workers + worker.py): a lock file keeps
-    the time of the last download start, so the courtesy gap toward Gutenberg is global, not per process."""
-
-    def __init__(self, path, min_interval=2.0, sleep=time.sleep):
-        self.path, self.min_interval, self._sleep = path, float(min_interval), sleep
-        self._fallback = RateGate(min_interval, sleep=sleep)
-        try:
-            import fcntl
-            self._fcntl = fcntl
-        except ImportError:                       # e.g. Windows: fall back to a per-process gate
-            self._fcntl = None
-
-    def wait(self):
-        if not self._fcntl or self.min_interval <= 0:
-            return self._fallback.wait()
-        with open(self.path, "a+") as handle:
-            self._fcntl.flock(handle, self._fcntl.LOCK_EX)         # one download start at a time, machine-wide
-            try:
-                handle.seek(0)
-                try:
-                    last = float(handle.read().strip() or 0)
-                except ValueError:
-                    last = 0.0
-                delay = last + self.min_interval - time.time()
-                if delay > 0:
-                    self._sleep(delay)
-                handle.seek(0); handle.truncate(); handle.write(repr(time.time())); handle.flush()
-            finally:
-                self._fcntl.flock(handle, self._fcntl.LOCK_UN)
 
 
 def trusted_url(value):
@@ -130,7 +86,7 @@ def clean_for_language(text, language):
     return cleaned if cleaned and len(cleaned.strip()) >= DEFAULT_MIN_CHARS else clean_gutenberg_text(text)
 
 
-def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, opener=urllib.request.urlopen, progress=None):
+def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, opener=fetchguard.safe_opener(fetchguard.GUTENBERG_HOSTS), progress=None):
     """Fetch the raw bytes once. Raises Transient/PermanentSourceError.
 
     `progress(fraction, got_bytes)`: fraction is None when the server did not say how big the file is. A silent server
@@ -146,6 +102,8 @@ def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, open
                 size = int(response.headers.get("Content-Length") or 0)
             except ValueError:
                 size = 0
+            if size > MAX_TEXT_BYTES:
+                raise PermanentSourceError(f"eBook #{gid}: the file is far larger than any book.")
             chunks, got = [], 0
             while True:
                 chunk = response.read(65536)
@@ -153,6 +111,8 @@ def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, open
                     break
                 chunks.append(chunk)
                 got += len(chunk)
+                if got > MAX_TEXT_BYTES:
+                    raise PermanentSourceError(f"eBook #{gid}: the file is far larger than any book.")
                 if progress:
                     progress(got / size if size else None, got)
                 if time.monotonic() - started > deadline:
@@ -160,7 +120,9 @@ def download(url, gid, *, timeout=CONNECT_TIMEOUT, deadline=TOTAL_DEADLINE, open
             raw = b"".join(chunks)
     except urllib.error.HTTPError as exc:
         if exc.code in (408, 425, 429, 500, 502, 503, 504):
-            raise TransientSourceError(f"eBook #{gid}: HTTP {exc.code}") from exc
+            err = TransientSourceError(f"eBook #{gid}: HTTP {exc.code}")
+            err.retry_after = fetchguard.parse_retry_after(exc.headers.get("Retry-After") if exc.headers else None)
+            raise err from exc
         raise PermanentSourceError(f"eBook #{gid}: HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise TransientSourceError(f"eBook #{gid}: {getattr(exc, 'reason', exc)}") from exc

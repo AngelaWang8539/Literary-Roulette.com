@@ -18,6 +18,17 @@
 
 # Changelog
 
+## 0.9.0 - Book Registry, hardened providers, truthful popularity
+- **Book Registry** (`registry.py`, SQLite): one stable `book_id` per book; rights, text and pool status are separate; provider snapshots; popularity observations; provider runs. The random index (`universe.py`, now schema 4) is built from it, so paused / withdrawn / failed books are never drawn (immediately, without a rebuild). The shipped index is upgraded locally, no network.
+- **Registry Center** (`/admin/registry`, `LR_ADMIN_TOKEN`): Books, Imports, Sources & Sync. CLI twin: `tools/registry_admin.py`.
+- **Author TXT intake** (`intake.py`): strict UTF-8, length and passage checks, duplicate hash, private hash-named store; a file that passes is only PENDING until rights are approved (territory, commercial scope, attribution, expiry) and the book is activated.
+- **fetchguard.py**: https + host allowlist (redirects re-checked), User-Agent with contact (`LR_CONTACT_EMAIL`), timeouts, size and content-type limits, Retry-After, back-off with jitter, per-provider circuit breaker, shared rate gate. Catalogue download verifies the whole gzip, caps size, and a damaged / shrunken / duplicate-heavy file is REJECTED while the last good data stays live; an unchanged file rebuilds nothing.
+- **Gutendex** enrichment (`gutendex.py`): targeted batches of 32 ids, dated snapshots, NULL for unknown counts, copyright flag holds a book for review, optional census.
+- **Popularity is truthful**: the old placeholder percentile is gone. Percentile badges need a COMPLETE, fresh per-language population; a book outside the top 100 gets a neutral "off the beaten shelf" (it was labelled a hidden gem). Every badge names its source and period; Gutendex counts are not called "30-day" figures.
+- **Draw**: the original cold pick stays a pending handle; overload or paused downloads fall back to the ready shelf and SAY so; the queue is bounded atomically; a new round starts only when every eligible book has been seen.
+- **History**: 70 entries, language recorded, recent books seeded into the pouch BEFORE the first draw and kept when the catalogue reopens; export / restore file (not a sync).
+- Production warns when `LR_SECRET_KEY` is not set. Constant-time admin token check, admin rate bucket. `tools/loadtest.py` for the concurrency gates.
+
 ## 0.8.0 - one catalogue source, honest first run
 - Catalogue now comes from `pg_catalog.csv.gz`, the same single file the desktop app uses (seconds, not minutes). First run opens the catalogue
   with the librarian's cart and REAL progress; a prebuilt `data/universe_seed.sqlite` or `LR_CATALOG_CSV` makes it instant. Daily background refresh.

@@ -4,6 +4,7 @@ Every spin is a uniform draw from the whole catalogue (universe.py, built from G
 that has been prepared before is instant; a cold one is fetched once by a background worker while the visitor watches
 the librarian with real progress, then it stays in the shared library for every later reader. See README.md.
 """
+import hmac
 import os
 import random
 import threading
@@ -14,9 +15,12 @@ from flask import Flask, jsonify, redirect, render_template, request, session
 
 import analytics
 import draw
+import hardening
+import popularity as popularity_mod
 import prep
 import tickets
 from library import LINK_KINDS
+from registry import RegistryError
 from runtime import LANGUAGES, Runtime
 
 SITE = {"creator_name": "[Your Name]", "contact_email": "[rights contact email to be added]"}
@@ -51,6 +55,7 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
 
+    metrics = hardening.Metrics()
     rt = Runtime(app.config)
     app.runtime, app.catalogues, app.shelf = rt, rt.catalogues, rt.shelf
     app.secret_key = rt.secret
@@ -91,8 +96,7 @@ def create_app(test_config=None):
         if now >= _next_meta_check[0] and _meta_lock.acquire(blocking=False):
             try:
                 _next_meta_check[0] = now + 10
-                if rt.universe.reload():
-                    rt.attach_popularity()
+                rt.universe.reload()               # also picks up Registry changes (paused / withdrawn books) made by another process
             finally:
                 _meta_lock.release()
 
@@ -162,6 +166,10 @@ def create_app(test_config=None):
     def healthz():
         return jsonify(ok=True, ready=rt.ready_counts(), mode={code: rt.mode(code) for code in LANGUAGES})
 
+    def admin_ok():
+        token, sent = app.config["ADMIN_TOKEN"], request.headers.get("X-LR-Admin", "")
+        return bool(token) and hmac.compare_digest(sent.encode("utf-8"), str(token).encode("utf-8"))
+
     # ---- status ------------------------------------------------------------------------------
     @app.get("/api/catalogue/status")
     def catalogue_refresh_status():
@@ -169,8 +177,7 @@ def create_app(test_config=None):
 
     @app.get("/api/shelf/status")
     def shelf_status():
-        detail = bool(app.config["ADMIN_TOKEN"]) and request.headers.get("X-LR-Admin") == app.config["ADMIN_TOKEN"]
-        data = rt.worker.status(detail=detail)
+        data = rt.worker.status(detail=admin_ok())
         data["ready"] = rt.ready_counts()
         data["mode"] = {code: rt.mode(code) for code in LANGUAGES}
         return jsonify(ok=True, **data)
@@ -202,11 +209,13 @@ def create_app(test_config=None):
 
     @app.post("/api/draw")
     def draw_tickets():
-        """A few sealed, anonymous tickets: different books, each a uniform draw from the whole catalogue.
+        """A few sealed, anonymous tickets: different books, each a uniform draw from the whole eligible catalogue.
 
-        A book prepared before comes back at once. A cold one is queued for the worker and returned as a `pending`
-        handle to poll while the librarian works. If the queue is already too long to be fair to the visitor
-        (estimated_wait > max_cold_wait), the pick is swapped for a random book from the shared library instead."""
+        A book prepared before comes back at once. A cold one is queued for the worker and returned as a `pending` handle to poll
+        while the librarian works: the ORIGINAL random pick is kept. Only when the queue is longer than max_cold_wait, or downloads
+        are paused after repeated failures, does a pick fall back to the ready shelf - and then the response says so
+        (`fallback`), because the shelf is a sample of the catalogue, not the whole of it. A new round starts (`restarted`) only
+        when the reader has seen every eligible book."""
         body = body_json()
         language = language_from(body)
         cat = rt.catalogues[language]
@@ -222,7 +231,8 @@ def create_app(test_config=None):
             sync = rt.sync.status()
             return fail("catalogue_opening", "The librarian is opening the catalogue.", 503, retry_after=1,
                         progress={"message": sync.get("message") or "Opening the catalogue\u2026", "percent": sync.get("percent")})
-        out, pending, restarted, shed = [], [], False, 0
+        out, pending, restarted, shed, why = [], [], False, 0, None
+        metrics.incr("draws")
         if mode == "starter":                    # the catalogue could not be opened: a small bundled shelf, said out loud
             ids = rt.starters(language)
             if not ids:
@@ -230,45 +240,50 @@ def create_app(test_config=None):
             picked, restarted = draw.pick_books(ids, cat.book_token, count, seen, rng(), avoid)
             out = [t for t in (random_ticket(language, cat, bid) for bid in picked) if t]
         else:
-            records = rt.universe.random_candidates(language, count, rng(), reject=lambda r: cat.book_token(r["id"]) in seen or r["id"] in avoid)
             total = rt.universe.count(language)
+            unseen = lambda r: cat.book_token(r["id"]) in seen or r["id"] in avoid
+            records = rt.universe.random_candidates(language, count, rng(), reject=unseen)
+            if len(records) < count and total <= len(seen) + len(avoid) + len(rt.universe.ineligible):      # only a small catalogue can be used up
+                if not any(not unseen(r) for r in rt.universe.iter_eligible(language)):
+                    restarted = True                                                # everything seen: an explicit new round
+                    records = rt.universe.random_candidates(language, count, rng(), reject=lambda r: r["id"] in avoid)
             for record in records:
-                ready = rt.ready_book_id(language, record["gutenberg_id"])
+                ready = rt.ready_book_id(language, record)
                 if ready:
                     ticket = random_ticket(language, cat, ready)
                     if ticket:
                         out.append(ticket)
-                elif rt.worker.estimated_wait() <= rt.worker.settings.max_cold_wait:
-                    if not rt.worker.enqueue(prep.COLD, language, record, priority=0):
-                        rt.worker.bump(language, record["id"])
+                        metrics.incr("ready_hits")
+                    continue
+                admitted, reason = rt.worker.request_cold(language, record)
+                if admitted:
                     pending.append({"handle": cat.book_token(record["id"]), "draw_number": record["draw_number"], "total": total})
+                    metrics.incr("cold_pending")
                 else:
-                    shed += 1
-            # Always keep the reader's ready-to-serve pouch stocked.
-            # Pending cold picks already occupy their draw slots.
-            if len(out) + len(pending) < count:
+                    shed, why = shed + 1, why or reason
+                    rt.worker.queue_in_background(language, record)      # still prepare the original pick later: the library stays a fair sample
+            if len(out) + len(pending) < count:           # keep the reader's pouch stocked from the ready shelf
                 taken = {t["book_token"] for t in out} | {p["handle"] for p in pending}
                 used_tokens = seen | taken
-
-                ready_pool = tuple(dict.fromkeys(
-                    (*rt.lake(language), *rt.starters(language))
-                ))
-
-                fresh_ready = [
-                    bid for bid in ready_pool
-                    if bid not in avoid and cat.book_token(bid) not in used_tokens
-                ]
-
-                backups, _ = draw.pick_books(
-                    fresh_ready, cat.book_token, count - len(out) - len(pending), set(), rng()
-                )
-
-                out.extend(
-                    t for t in (random_ticket(language, cat, bid) for bid in backups) if t
-                )
+                ready_pool = tuple(dict.fromkeys((*rt.lake(language), *rt.starters(language))))
+                fresh_ready = [bid for bid in ready_pool
+                               if bid not in avoid and bid not in rt.universe.ineligible and cat.book_token(bid) not in used_tokens]
+                backups, _ = draw.pick_books(fresh_ready, cat.book_token, count - len(out) - len(pending), set(), rng())
+                served = [t for t in (random_ticket(language, cat, bid) for bid in backups) if t]
+                if shed:
+                    for t in served:
+                        t["fallback"] = True                  # the reader's page can say this pick came from the ready shelf
+                    if served:
+                        metrics.incr("fallback_served", len(served))
+                out.extend(served)
+        fallback = {"kind": "ready_shelf", "reason": why, "temporary": True} if shed and why and out else None
+        if restarted:
+            metrics.incr("restarts")
         if not out and not pending:
+            if shed:
+                return fail("busy", "The librarian is busy right now. Try again in a moment.", 503, retry_after=3)
             return fail("only_one_book", "Only one usable book is available in this collection.", 200)
-        return jsonify(ok=True, mode=mode, language=language, tickets=out, pending=pending, shed=shed,
+        return jsonify(ok=True, mode=mode, language=language, tickets=out, pending=pending, shed=shed, fallback=fallback,
                        restarted=restarted, total=rt.universe.count(language), ready_books=len(rt.lake(language)))
 
     @app.post("/api/draw/poll")
@@ -336,8 +351,13 @@ def create_app(test_config=None):
         rt.shelf.note_interest(language, book["id"], "reveal")
         payload_ = cat.book_payload(book, index)
         if str(book.get("gutenberg_id") or "").isdigit():       # popularity is looked up fresh at reveal time, never stored stale
-            deep = rt.universe.popularity(language, int(book["gutenberg_id"])) if rt.universe.available else None
-            payload_["popularity"] = rt.popularity.payload(language, book["gutenberg_id"], deep=deep)
+            gid, reg_id, deep = int(book["gutenberg_id"]), f"pg-{language}-{int(book['gutenberg_id'])}", None
+            rank = rt.registry.percentile(reg_id)                # only from a complete, fresh per-language population
+            if rank:
+                deep = popularity_mod.deep_payload(language, rank["rank"], rank["total"], rank["top_percent"], rank["value"],
+                                                   rank["observed_at"], gid=gid)
+            seen_count = None if deep else rt.registry.observed(reg_id)
+            payload_["popularity"] = rt.popularity.payload(language, gid, deep=deep, observed=seen_count if seen_count and seen_count["status"] == "ok" else None)
         return jsonify(ok=True, language=language, book=payload_)
 
     @app.post("/api/event")
@@ -370,14 +390,108 @@ def create_app(test_config=None):
         rt.shelf.note_interest(language, book["id"], "link")
         return redirect(url, 302)
 
+    # ---- Registry Center (admin only: needs LR_ADMIN_TOKEN; everything else answers 404/401) ---------------------------
+    def admin_gate():
+        if not app.config["ADMIN_TOKEN"]:
+            return fail("not_found", "Not found.", 404)
+        if not admin_ok():
+            return fail("unauthorized", "Admin token required.", 401)
+        return None
+
+    def book_row(b):
+        keys = ("book_id", "provider", "provider_id", "language", "title", "author", "pool_status", "status_reason", "rights_status",
+                "rights_territory", "rights_commercial", "rights_expires", "rights_note", "attribution", "text_status", "text_error",
+                "revision", "metadata_status", "updated_at")
+        return {k: b.get(k) for k in keys}
+
+    @app.get("/admin/registry")
+    def registry_center():
+        if not app.config["ADMIN_TOKEN"]:
+            return fail("not_found", "Not found.", 404)
+        return render_template("admin_registry.html")
+
+    @app.get("/api/admin/registry/summary")
+    def admin_summary():
+        if (denied := admin_gate()):
+            return denied
+        return jsonify(ok=True, registry=rt.registry.summary(), universe={"counts": rt.universe.counts, "generated_at": rt.universe.generated_at,
+                                                                               "available": rt.universe.available, "ineligible": len(rt.universe.ineligible)},
+                       worker=rt.worker.status(), metrics=metrics.snapshot(), queue_wait=round(rt.worker.estimated_wait(), 1),
+                       percentile_ready={code: rt.registry.complete(code) for code in LANGUAGES})
+
+    @app.get("/api/admin/registry/books")
+    def admin_books():
+        if (denied := admin_gate()):
+            return denied
+        arg = request.args.get
+        def number(name, default):
+            try:
+                return int(arg(name, default))
+            except ValueError:
+                return default
+        found = rt.registry.search(q=(arg("q") or "")[:80], language=arg("language") or None, pool=arg("pool") or None, rights=arg("rights") or None,
+                                   provider=arg("provider") or None, text=arg("text") or None, limit=number("limit", 50), offset=number("offset", 0))
+        return jsonify(ok=True, total=found["total"], books=[book_row(b) for b in found["books"]])
+
+    @app.get("/api/admin/registry/imports")
+    def admin_imports():
+        if (denied := admin_gate()):
+            return denied
+        found = rt.registry.search(provider="author", limit=100)
+        return jsonify(ok=True, total=found["total"], books=[{**book_row(b), "blockers": rt.registry.blockers(b["book_id"])} for b in found["books"]])
+
+    @app.get("/api/admin/registry/sources")
+    def admin_sources():
+        if (denied := admin_gate()):
+            return denied
+        return jsonify(ok=True, providers=rt.registry.provider_status(), guards={k: g.status() for k, g in rt.guards.items()},
+                       catalogue=rt.sync.status(), gutendex={"enabled": rt.gutendex.enabled, "due": rt.gutendex.due(), "census": rt.gutendex.census,
+                                                              "interval_hours": rt.gutendex.interval / 3600})
+
+    def registry_action(fn, *args, rebuild=False, **kw):
+        try:
+            book = fn(*args, **kw)
+        except RegistryError as exc:
+            return fail("refused", str(exc), 400)
+        rt.universe.reload()                                   # shrinking changes (pause, archive, withdraw) apply immediately
+        if rebuild:
+            rt.sync.rebuild_in_background()                    # only a rebuild can ADD a book to the index
+        return jsonify(ok=True, book=book_row(book), rebuild=bool(rebuild))
+
+    @app.post("/api/admin/registry/books/<book_id>/pool")
+    def admin_pool(book_id):
+        if (denied := admin_gate()):
+            return denied
+        body = body_json()
+        status = body.get("status")
+        return registry_action(rt.registry.set_pool_status, book_id, status, str(body.get("reason") or "")[:200], rebuild=status == "active")
+
+    @app.post("/api/admin/registry/books/<book_id>/rights")
+    def admin_rights(book_id):
+        if (denied := admin_gate()):
+            return denied
+        body = body_json()
+        text = lambda key: (str(body[key])[:200] if body.get(key) is not None else None)
+        return registry_action(rt.registry.set_rights, book_id, body.get("status"), territory=text("territory"), commercial=body.get("commercial"),
+                               attribution=text("attribution"), expires=text("expires"), note=text("note"))
+
+    @app.post("/api/admin/registry/run/<name>")
+    def admin_run(name):
+        if (denied := admin_gate()):
+            return denied
+        jobs = {"catalogue": rt.sync.run, "gutendex": rt.gutendex.run, "scores": rt.popularity.refresh}
+        if name not in jobs:
+            return fail("unknown_provider", "Unknown provider.", 404)
+        threading.Thread(target=jobs[name], name=f"lr-run-{name}", daemon=True).start()
+        return jsonify(ok=True, started=name)
+
     @app.after_request
     def no_store_for_api(response):
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    import hardening
-    hardening.apply(app)
+    hardening.apply(app, metrics=metrics)
 
     return app
 

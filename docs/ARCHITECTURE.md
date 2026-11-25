@@ -1,12 +1,14 @@
-# Architecture (0.8)
+# Architecture (0.9)
 
 ```
-Browser: ticket pouch (3 sealed tickets), seen-lists, History (max 75) in IndexedDB
+Browser: ticket pouch (3 sealed tickets), seen-lists, History (max 70) in IndexedDB, seeded into the pouch before the first draw
   -> Read API (Flask, stateless)  /api/draw  /api/draw/poll  /api/passage/another  /api/book/reveal  /api/event  /api/ocean
-       -> CATALOGUE  instance/universe.sqlite  every Gutenberg text edition (metadata), random draw position n
+       -> CATALOGUE  instance/universe.sqlite  random index of every ELIGIBLE book (built from the Registry), draw position n
+       -> REGISTRY   instance/registry.sqlite  one stable id per book; rights / text / pool status; provider snapshots; popularity; sync runs
        -> LIBRARY    instance/ready/<lang>/    every book prepared so far, shared, kept (+ a small starter shelf)
 Background worker (prep.py): fetch -> clean -> segment -> publish, waves that grow the library, shedding under overload
-Catalogue sync (catalogue_sync.py): pg_catalog.csv.gz -> universe.sqlite, first run + daily, real progress
+Coordinator (catalogue_sync.py): pg_catalog.csv.gz -> validate -> Registry -> universe.sqlite (daily, real progress); top lists; Gutendex batches;
+  each provider on its own schedule; every upstream call goes through fetchguard.py
 ```
 
 ## The idea (built to scale)
@@ -21,12 +23,15 @@ read from storage, and the librarian shows up mainly for books nobody has opened
 2. `mode = opening` (no index yet): 503 `catalogue_opening` with the sync's real message and percent; the page shows the cart at once.
 3. `mode = ocean`: three uniform picks. Prepared ones come back as tickets; cold ones as `pending` handles polled via `/api/draw/poll`
    (real stages: queued, fetching with bytes, cleaning, indexing). The librarian shows at once because the wait is certain.
-4. Overload: if the queue ahead would exceed `LR_MAX_COLD_WAIT`, the cold pick is swapped for a random prepared book (still random).
+4. Overload: the original random pick stays a `pending` handle while the wait is bearable. Past `LR_MAX_COLD_WAIT` / `LR_QUEUE_CAP`, or while downloads are
+   paused, the pick is served from the ready shelf and flagged (`fallback`, per ticket). The original pick is still prepared later, within the queue bound.
 5. `mode = starter` only when the catalogue could not be opened at all (said out loud on the page).
 6. While the visitor reads, the pouch refills quietly, so the next spin is usually instant.
 
 ## Limits that keep data from piling up
-History 75 - seen-lists 120 books / 200 passages - failed list 300 - tickets expire (2 h) - library trimmed (oldest first) only above its target.
+History 70 - seen-lists 120 books / 200 passages - failed list 300 - tickets expire (2 h) - library trimmed (oldest first) only above its target.
+
+See docs/REGISTRY.md for the Registry, rights gate, popularity rules and author intake.
 
 ## Known limits
 Cold-pick preparation runs in the web process (lock files dedupe with a separate worker.py). Many web machines would need a shared

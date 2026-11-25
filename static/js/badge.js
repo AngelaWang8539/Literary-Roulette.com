@@ -10,6 +10,8 @@ export function badgeText(p) {
       return pct ? { short: `Top ${pct}%`, long: `Top ${pct}% most popular` } : { short: "Top 100 this month", long: "Top 100 most popular this month" };
     case "hidden-gem":
       return pct >= 91 || (!pct && p.rank) ? { short: "Last 10%", long: "Among the least read 10%" } : { short: "Off the list", long: "Off the beaten shelf" };
+    case "offlist":      // neutral: only says "not in the top list"; never a claim about being unpopular
+      return { short: "Off the list", long: "Off the beaten shelf" };
     default:
       return { short: "Discovery", long: "A fresh discovery" };
   }

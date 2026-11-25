@@ -2,8 +2,9 @@
 
 The worker owns every slow thing. A visitor request never waits on it.
 
-* Jobs are keyed (language, book_id, edition_key, revision); the same key is queued once, and a
-  lock file stops two processes preparing the same edition at the same time.
+* Jobs are keyed (language, book_id, edition_key, segmenter version); the same key is queued once, and a
+  lock file stops two processes preparing the same edition at the same time. For author books the edition key carries the
+  text hash, so a key is book + text hash + segmenter version.
 * Downloads share one bounded concurrency limit and a minimum gap, whatever the number of visitors.
 * Transient failures retry later with exponential back-off and jitter; permanent ones (404, rights,
   unreadable text) are remembered and not retried.
@@ -12,7 +13,8 @@ The worker owns every slow thing. A visitor request never waits on it.
   draw from the WHOLE catalogue (universe.py); a book already in the library is instant, a cold one is prepared once
   (visitors wait with the librarian) and then reused by every later reader. Waves of random picks (3, 5, 8, 12 ...)
   grow the library in the background within the source's courtesy limits, up to `library_target` books per language
-  ("all" in production). Under overload the worker sheds cold picks (see estimated_wait) instead of queueing forever.
+  ("all" in production). The queue is bounded: past `max_cold_wait` or while downloads are paused, /api/draw serves the ready
+shelf and SAYS so (admit_cold), never silently.
 """
 import hashlib
 import heapq
@@ -41,6 +43,7 @@ class Settings:
         self.first_wave = int(kw.get("first_wave", 3))
         self.max_wave = int(kw.get("max_wave", 12))
         self.max_cold_wait = float(kw.get("max_cold_wait", 12.0))     # seconds of queue a visitor may be asked to wait
+        self.queue_cap = int(kw.get("queue_cap", 40))                 # hard bound on waiting cold jobs (all processes)
         self.workers = int(kw.get("workers", 3))
         self.source_concurrency = int(kw.get("source_concurrency", 2))
         self.min_interval = float(kw.get("min_interval", 2.0))       # seconds between downloads (Gutenberg asks for ~2 s)
@@ -55,8 +58,16 @@ class Settings:
 
 
 def edition_key_for(book):
+    if book.get("provider") == "author":
+        return f"author-{book['id']}-{str(book.get('text_hash') or '')[:12]}"
     gid = book.get("gutenberg_id")
     return f"pg-{gid}-plain-text" if gid else f"local-{book['id']}"
+
+
+def _gutenberg_id(book_id):
+    """The Gutenberg number inside a pg-<lang>-<number> id; None for every other kind of book id."""
+    parts = str(book_id).split("-")
+    return int(parts[2]) if len(parts) == 3 and parts[0] == "pg" and parts[2].isdigit() else None
 
 
 class Job:
@@ -66,12 +77,14 @@ class Job:
         self.queued_at, self.not_before = time.time(), 0.0
         self.stage, self.percent = "queued", 6
         self.detail, self.indeterminate, self.last_move = "", False, time.time()
+        self.retry_after, self.withdrawn = None, False
 
 
 class PrepWorker:
     def __init__(self, shelf, catalogues, universe, state_dir, settings=None, *, fetcher=None, sleep=time.sleep,
-                 rng=None, clock=time.time):
+                 rng=None, clock=time.time, registry=None, text_store=None):
         self.shelf, self.catalogues, self.universe = shelf, catalogues, universe
+        self.registry, self.text_store, self.downloads = registry, text_store, 0
         self.settings = settings or Settings()
         self.state_dir = Path(state_dir)
         self.lock_dir = self.state_dir / ".locks"
@@ -87,6 +100,7 @@ class PrepWorker:
         self._fail_streak, self._breaker_until = 0, 0.0
         self._downloads = threading.BoundedSemaphore(max(1, self.settings.source_concurrency))
         self._cv = threading.Condition()
+        self._admit_lock = threading.Lock()
         self._heap, self._delayed, self._seq = [], [], 0
         self._jobs = {}                 # key -> Job (queued / running / waiting retry)
         self._failed = self._load_failed()
@@ -116,8 +130,8 @@ class PrepWorker:
             log.warning("Could not save failed-job list: %s", exc)
 
     @staticmethod
-    def job_key(language, book_id, edition_key, revision="1"):
-        return f"{language}|{book_id}|{edition_key}|{revision}"
+    def job_key(language, book_id, edition_key, revision=None):
+        return f"{language}|{book_id}|{edition_key}|{revision or segment.segment_version(language)}"
 
     def _claim(self, key):
         """Cross-process lock for one edition. Returns a release callable, or None if someone else has it."""
@@ -274,11 +288,14 @@ class PrepWorker:
                     return
                 job.attempts += 1
                 self._publish(job, "running")
+                if job.kind == COLD and self.registry and not self.registry.is_eligible(job.book["id"]):
+                    job.withdrawn = True
+                    raise source.PermanentSourceError("This book was taken out of the pool before it could be prepared.")
                 self._prepare(job)
                 self._note_result(True)
                 self._finish(job, done=True)
             except source.SourceError as exc:
-                job.error = str(exc)
+                job.error, job.retry_after = str(exc), exc.retry_after
                 if job.kind == COLD:
                     self._note_result(False, transient=not exc.permanent)
                 self._finish(job, permanent=exc.permanent)
@@ -307,6 +324,8 @@ class PrepWorker:
                 self._cv.notify()
                 outcome = ("queued", None)
             elif permanent or job.attempts >= self.settings.max_attempts:
+                if permanent and self.registry and job.kind == COLD and not job.withdrawn:
+                    self.registry.mark_text(job.book["id"], "failed", error=job.error)    # never drawn again until cleared
                 self._jobs.pop(job.key, None)
                 self._failed[job.key] = {"error": job.error, "permanent": True, "attempts": job.attempts,
                                          "at": self._clock(), "book": job.book["id"], "language": job.language}
@@ -316,6 +335,8 @@ class PrepWorker:
             else:
                 delay = min(self.settings.backoff_cap, self.settings.backoff_base * (2 ** (job.attempts - 1)))
                 delay *= 0.5 + self.rng.random()                 # jitter
+                if job.retry_after:
+                    delay = min(self.settings.backoff_cap, max(delay, job.retry_after))     # the server's own advice wins
                 job.state, job.not_before = "queued", self._clock() + delay
                 self._push(job)
                 self._cv.notify()
@@ -350,10 +371,20 @@ class PrepWorker:
                 raise source.PermanentSourceError("local text is no longer verified")
             text = cat.read_local_text(book["id"])
             content_hash = info["sha256"]
+        elif book.get("provider") == "author":
+            if not self.text_store:
+                raise source.PermanentSourceError("author texts are not available here")
+            self._set_stage(job, "cleaning", 40)
+            try:
+                text = self.text_store.read(book.get("text_key"), expect_hash=book.get("text_hash"))
+            except (OSError, ValueError) as exc:
+                raise source.PermanentSourceError(f"the stored author text cannot be used: {exc}") from exc
+            content_hash = book["text_hash"]
         else:
             self._set_stage(job, "fetching", 12)
             with self._downloads:               # bounded concurrency toward the source
                 self.gate.wait()
+                self.downloads += 1
                 if self._fetch_reports_progress:
                     def report(fraction, got=None):
                         if fraction is None:        # the server gave no size: report bytes, not an invented percentage
@@ -375,6 +406,8 @@ class PrepWorker:
                            book=book if cold else None)
         if cold:
             self.catalogues[language].register_external(book)
+            if self.registry:
+                self.registry.mark_text(book["id"], "verified", text_hash=content_hash)
         job.stage, job.percent = "ready", 100
 
     # ---- the lake ----------------------------------------------------------------------------
@@ -399,6 +432,33 @@ class PrepWorker:
             wait += (self._breaker_until - self._clock()) + self.settings.max_cold_wait + 1
         return wait
 
+    def request_cold(self, language, record):
+        """Admit AND queue one visitor's cold pick atomically (so concurrent requests cannot overshoot the queue bound).
+        Returns (True, None) with the job queued/bumped to the front, or (False, reason) with nothing queued."""
+        with self._admit_lock:
+            admitted, reason = self.admit_cold()
+            if admitted and not self.enqueue(COLD, language, record, priority=0):
+                self.bump(language, record["id"])
+            return admitted, reason
+
+    def queue_in_background(self, language, record):
+        """Queue the original pick at low priority while the visitor is served from the ready shelf, if the bound allows."""
+        with self._admit_lock:
+            return self.has_room() and self.enqueue(COLD, language, record, priority=5)
+
+    def has_room(self):
+        """May one more cold job join the queue at all (hard bound, shared by every process)?"""
+        return not self.breaker_open() and self.store.pending_cold() < self.settings.queue_cap
+
+    def admit_cold(self):
+        """(True, None) when a visitor may wait for a cold pick; otherwise (False, reason) with reason 'source_paused' (downloads
+        are paused after repeated failures) or 'busy' (the queue is longer than max_cold_wait). The caller must TELL the visitor."""
+        if self.breaker_open():
+            return False, "source_paused"
+        if self.store.pending_cold() >= self.settings.queue_cap or self.estimated_wait() > self.settings.max_cold_wait:
+            return False, "busy"
+        return True, None
+
     def job_view(self, language, book_token):
         """Progress of the newest job for this book token, from the shared store (any process can answer)."""
         return self.store.view(language, book_token)
@@ -410,17 +470,22 @@ class PrepWorker:
         """Editions that must not be drawn again right now: in the lake, queued, failed for good, or a starter book."""
         gids = set()
         for bid in self.lake_ids(language):
-            tail = bid.rsplit("-", 1)[-1]
-            if tail.isdigit():
-                gids.add(int(tail))
+            if _gutenberg_id(bid) is not None:
+                gids.add(_gutenberg_id(bid))
         with self._cv:
             gids.update(int(j.book["gutenberg_id"]) for j in self._jobs.values()
                         if j.language == language and str(j.book.get("gutenberg_id") or "").isdigit())
-            gids.update(int(f["book"].rsplit("-", 1)[-1]) for f in self._failed.values()
-                        if f.get("language") == language and str(f.get("book", "")).rsplit("-", 1)[-1].isdigit())
+            gids.update(_gutenberg_id(f.get("book")) for f in self._failed.values()
+                        if f.get("language") == language and _gutenberg_id(f.get("book")) is not None)
         gids.update(int(b["gutenberg_id"]) for b in self.catalogues[language].all_books()
                     if str(b.get("gutenberg_id") or "").isdigit() and b["id"] in self.catalogues[language].local_texts)
         return gids
+
+    def known_book_ids(self, language):
+        """Ids (any provider) already in the lake, queued or failed: the non-Gutenberg twin of known_gids."""
+        with self._cv:
+            return set(self.lake_ids(language)) | {j.book["id"] for j in self._jobs.values() if j.language == language} | \
+                {f.get("book") for f in self._failed.values() if f.get("language") == language}
 
     def bump(self, language, book_id):
         """A visitor is waiting on this edition: move it to the front of the queue."""
@@ -468,9 +533,9 @@ class PrepWorker:
                 continue
             if self.pending_cold(language) > self.wave[language] // 2:
                 continue                                                          # the last wave is still on its way
-            skip = self.known_gids(language)
+            skip, known = self.known_gids(language), self.known_book_ids(language)
             picks = self.universe.random_candidates(language, min(deficit, self.wave[language]), self.rng,
-                                                    reject=lambda r: r["gutenberg_id"] in skip)
+                                                    reject=lambda r: r["gutenberg_id"] in skip or r["id"] in known)
             for record in picks:
                 if self.enqueue(COLD, language, record, priority=5):
                     queued += 1
@@ -518,3 +583,5 @@ class PrepWorker:
         with self._cv:
             self._failed.clear()
         self._save_failed()
+        if self.registry:
+            self.registry.reset_failed()
