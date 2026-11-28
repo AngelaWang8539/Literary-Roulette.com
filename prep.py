@@ -39,11 +39,12 @@ class Settings:
     """Library and source-courtesy knobs."""
 
     def __init__(self, **kw):
-        self.library_target = int(kw.get("library_target", 300))     # prepared books wanted per language (10**9 = all)
+        self.library_target = int(kw.get("library_target", 100))     # prepared books wanted per language (10**9 = all)
         self.first_wave = int(kw.get("first_wave", 3))
         self.max_wave = int(kw.get("max_wave", 12))
         self.max_cold_wait = float(kw.get("max_cold_wait", 12.0))     # seconds of queue a visitor may be asked to wait
         self.queue_cap = int(kw.get("queue_cap", 40))                 # hard bound on waiting cold jobs (all processes)
+        self.background_slots = int(kw.get("background_slots", 1))    # library-growing jobs that may run at once (a visitor's pick never waits behind a crowd of them)
         self.workers = int(kw.get("workers", 3))
         self.source_concurrency = int(kw.get("source_concurrency", 2))
         self.min_interval = float(kw.get("min_interval", 2.0))       # seconds between downloads (Gutenberg asks for ~2 s)
@@ -68,6 +69,9 @@ def _gutenberg_id(book_id):
     """The Gutenberg number inside a pg-<lang>-<number> id; None for every other kind of book id."""
     parts = str(book_id).split("-")
     return int(parts[2]) if len(parts) == 3 and parts[0] == "pg" and parts[2].isdigit() else None
+
+
+BACKGROUND = 5      # priority of the jobs that only grow the library; a visitor's own pick is priority 0
 
 
 class Job:
@@ -224,13 +228,23 @@ class PrepWorker:
                             queued = self._jobs.get(key)
                             if queued:
                                 heapq.heappush(self._heap, (queued.priority, seq, key))
+                parked, picked = [], None
                 while self._heap:
-                    _prio, _seq, key = heapq.heappop(self._heap)
-                    job = self._jobs.get(key)
-                    if job and job.state == "queued":
-                        job.state = "running"
-                        self._busy += 1
-                        return job
+                    entry = heapq.heappop(self._heap)
+                    job = self._jobs.get(entry[2])
+                    if not job or job.state != "queued":
+                        continue
+                    if entry[0] >= BACKGROUND and self._background_held(now):
+                        parked.append(entry)                    # not now: a visitor is waiting, or the background slot is taken
+                        continue
+                    picked = job
+                    break
+                for entry in parked:
+                    heapq.heappush(self._heap, entry)
+                if picked:
+                    picked.state = "running"
+                    self._busy += 1
+                    return picked
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
@@ -239,6 +253,18 @@ class PrepWorker:
                     nap = min(nap, max(0.05, min(d[0] for d in self._delayed) - now))
                 self._cv.wait(timeout=nap)
         return None
+
+    def _background_held(self, now):
+        """Library-growing jobs yield to people. They wait while any visitor's pick is queued or running (a pick that is only
+        waiting for a retry does not count), and only `background_slots` of them run at once. Called with the lock held.
+        Without this, a fresh server's first minute is spent on its own waves and the first reader waits behind them."""
+        running = 0
+        for job in self._jobs.values():
+            if job.priority >= BACKGROUND:
+                running += job.state == "running"
+            elif job.state == "running" or (job.state == "queued" and job.not_before <= now):
+                return True
+        return running >= self.settings.background_slots
 
     def run_pending(self, limit=1000):
         """Run queued jobs in the calling thread (tests, tools/prepare_shelf.py). Returns jobs processed."""
@@ -315,6 +341,7 @@ class PrepWorker:
                 self._jobs.pop(job.key, None)
                 self._failed.pop(job.key, None)
                 self.completed += 1
+                self._cv.notify_all()                    # background jobs may have been waiting for this visitor
                 outcome = ("done", None)
             elif requeue_after is not None:
                 job.state, job.not_before = "queued", self._clock() + requeue_after
@@ -330,6 +357,7 @@ class PrepWorker:
                 self._failed[job.key] = {"error": job.error, "permanent": True, "attempts": job.attempts,
                                          "at": self._clock(), "book": job.book["id"], "language": job.language}
                 self._save_failed()
+                self._cv.notify_all()
                 log.warning("Giving up on %s: %s", job.key, job.error)
                 outcome = ("failed", job.error)
             else:
@@ -381,9 +409,10 @@ class PrepWorker:
                 raise source.PermanentSourceError(f"the stored author text cannot be used: {exc}") from exc
             content_hash = book["text_hash"]
         else:
-            self._set_stage(job, "fetching", 12)
+            self._set_stage(job, "queued", 6, "waiting for the librarian's turn")        # honest: not downloading yet
             with self._downloads:               # bounded concurrency toward the source
                 self.gate.wait()
+                self._set_stage(job, "fetching", 12)
                 self.downloads += 1
                 if self._fetch_reports_progress:
                     def report(fraction, got=None):
