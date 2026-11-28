@@ -48,7 +48,8 @@ def settings_from_env(overrides=None):
     env, kw = os.environ, {}
     names = {"LR_FIRST_WAVE": "first_wave", "LR_MAX_WAVE": "max_wave", "LR_PREP_WORKERS": "workers",
              "LR_SOURCE_CONCURRENCY": "source_concurrency", "LR_SOURCE_MIN_INTERVAL": "min_interval",
-             "LR_PREP_CHECK_SECONDS": "check_interval", "LR_MAX_COLD_WAIT": "max_cold_wait", "LR_QUEUE_CAP": "queue_cap"}
+             "LR_PREP_CHECK_SECONDS": "check_interval", "LR_MAX_COLD_WAIT": "max_cold_wait", "LR_QUEUE_CAP": "queue_cap",
+             "LR_BACKGROUND_SLOTS": "background_slots"}
     for var, key in names.items():
         if env.get(var):
             kw[key] = env[var]
@@ -112,10 +113,13 @@ class Runtime:
         self.guards = fetchguard.make_guards(self.shelf_dir / ".gate", min_interval=self.settings.min_interval)   # same gate as book downloads
         self.popularity = popularity_mod.Popularity(instance_dir / "popularity.json", guard=self.guards["gutenberg"], registry=self.registry)
         self.text_store = intake.TextStore(Path(config.get("AUTHOR_TEXTS_DIR") or instance_dir / "registry" / "texts"))
+        wanted = env.get("LR_GUTENDEX_CENSUS", "").strip().lower()      # "1" / "all": every language; "fr,zh": only those; unset / "0": off
+        census_languages = None if wanted in ("", "0") else (tuple(LANGUAGES) if wanted in ("1", "all") else tuple(c for c in wanted.replace(" ", "").split(",") if c in LANGUAGES)) or None
         self.gutendex = gutendex_mod.Gutendex(
             self.registry, self.guards["gutendex"], prefer=self.gutendex_targets, enabled=env.get("LR_GUTENDEX", "1") != "0",
-            per_run=int(env.get("LR_GUTENDEX_PER_RUN", 160)), interval=float(env.get("LR_GUTENDEX_HOURS", 6)) * 3600,
-            census=env.get("LR_GUTENDEX_CENSUS") == "1")
+            per_run=int(env.get("LR_GUTENDEX_PER_RUN", 640 if census_languages else 160)),
+            interval=float(env.get("LR_GUTENDEX_HOURS", 1 / 6 if census_languages else 6)) * 3600,      # a census works through its backlog every ten minutes
+            census=bool(census_languages), census_languages=census_languages)
         self.worker = prep.PrepWorker(self.shelf, self.catalogues, self.universe, self.shelf_dir, self.settings,
                                       fetcher=config.get("FETCHER"), registry=self.registry, text_store=self.text_store)
         self.sync = self.make_sync(**(config.get("SYNC_KWARGS") or {}))
@@ -165,6 +169,19 @@ class Runtime:
         """The small bundled starter shelf. Used only while the full catalogue is closed or a fetch is slow."""
         ext = set(self.shelf.external_ids(language))
         return self._cached("starters", language, lambda cat: tuple(b for b in self.shelf.ids(language) if b not in ext and b in cat.books))
+
+    def fallback_pool(self, language):
+        """Ready IDs in draw order: the prepared lake first, followed by bundled starters."""
+        return tuple(dict.fromkeys((*self.lake(language), *self.starters(language))))
+
+    def source_notice(self):
+        """A short status message for the UI; an empty string means all mirrors are healthy."""
+        state = self.worker.source_state()
+        if state == "down":
+            return "Project Gutenberg mirrors are resting. Literary Roulette is serving its ready library while they recover."
+        if state == "degraded":
+            return "Some Project Gutenberg mirrors are resting; another mirror may still be available."
+        return ""
 
     def mode(self, language):
         """"ocean": the whole catalogue is open. "opening": it is being opened right now (the page shows the librarian

@@ -101,7 +101,8 @@ class PrepWorker:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.store = jobstate.JobStore(self.state_dir / "jobs.sqlite", clock=clock)     # progress every process can see
         self.gate = source.SharedRateGate(self.state_dir / ".gate", self.settings.min_interval)   # courtesy gap, machine-wide
-        self._fail_streak, self._breaker_until = 0, 0.0
+        self._fail_streak, self._breaker_until, self._breaker_level = 0, 0.0, 0
+        self.health = source.SourceHealth(self.state_dir / "source-health.json", clock=clock)
         self._downloads = threading.BoundedSemaphore(max(1, self.settings.source_concurrency))
         self._cv = threading.Condition()
         self._admit_lock = threading.Lock()
@@ -283,24 +284,41 @@ class PrepWorker:
             if job:
                 self._process(job)
 
+    def breaker_remaining(self):
+        local_left = max(0.0, self._breaker_until - self._clock())
+        health = getattr(self, "health", None)
+        source_left = health.rest_left_all(source.source_hosts()) if health else 0.0
+        return max(local_left, source_left)
+
     def breaker_open(self):
-        return self._clock() < self._breaker_until
+        health = getattr(self, "health", None)
+        source_down = bool(health and health.state(source.source_hosts()) == "down")
+        return self._clock() < self._breaker_until or source_down
+
+    def source_state(self):
+        health = getattr(self, "health", None)
+        return health.state(source.source_hosts()) if health else "ok"
 
     def _note_result(self, ok, transient=False):
-        """Circuit breaker: a run of temporary failures (server down, blocked) pauses fetching instead of hammering Gutenberg."""
+        """Pause repeated transient failures with an escalating, capped cooldown."""
         if ok:
             self._fail_streak = 0
+            self._breaker_until = 0.0
+            self._breaker_level = 0
         elif transient:
             self._fail_streak += 1
             if self._fail_streak >= self.settings.breaker_threshold:
-                self._breaker_until = self._clock() + self.settings.breaker_seconds
+                level = max(0, getattr(self, "_breaker_level", 0))
+                delay = min(3600.0, self.settings.breaker_seconds * (2 ** level))
+                self._breaker_until = self._clock() + delay
+                self._breaker_level = level + 1
                 self._fail_streak = 0
-                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs", self.settings.breaker_seconds)
+                log.warning("Too many temporary failures in a row: pausing downloads for %.0fs", delay)
 
     def _process(self, job):
         try:
             if job.kind == COLD and self.breaker_open():       # paused: do not start a download, look again when it closes
-                self._finish(job, requeue_after=max(1.0, self._breaker_until - self._clock()), count_attempt=False)
+                self._finish(job, requeue_after=max(1.0, self.breaker_remaining()), count_attempt=False)
                 return
             release = self._claim(job.key)
             if release is None:                 # another process is preparing this edition right now
@@ -420,7 +438,7 @@ class PrepWorker:
                             self._set_stage(job, "fetching", job.percent, f"{(got or 0) / 1e6:.1f} MB", True)
                         else:
                             self._set_stage(job, "fetching", 12 + int(48 * min(1.0, max(0.0, fraction))))
-                    text = self._fetch(book, progress=report)
+                    text = self._fetch(book, progress=report, health=self.health)
                 else:
                     text = self._fetch(book)
             self._set_stage(job, "cleaning", 68)

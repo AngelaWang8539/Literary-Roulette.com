@@ -54,7 +54,7 @@ python tools/sync_catalogue.py --export-seed     # creates data/universe_seed.sq
 |---|---|---|
 | `LR_CATALOG_CSV` | unset | Use this `pg_catalog.csv.gz` instead of downloading one. |
 | `LR_CATALOGUE_MAX_AGE_HOURS` | `24` | Refresh the catalogue in the background when the index is older. |
-| `LR_LIBRARY_TARGET` | `300` | Prepared books to grow per language. Use `all` in production to prepare the entire catalogue (tens of GB). |
+| `LR_LIBRARY_TARGET` | `100` | Prepared books to grow per language. Use `all` in production to prepare the entire catalogue (tens of GB). |
 | `LR_MAX_COLD_WAIT` | `12` | If the queue of new books would make a visitor wait longer than this (seconds), or downloads are paused, the pick is served from the ready shelf **and the page says so** (`fallback` in the answer). The original pick is still prepared later. |
 | `LR_QUEUE_CAP` | `40` | Hard bound on waiting cold jobs, shared by every process. |
 | `LR_CONTACT_EMAIL` / `LR_SITE_URL` | unset | Your contact e-mail (and site) put in the User-Agent of every request to Gutenberg and Gutendex. Set them before going public (`tools/preflight.py` checks). |
@@ -62,9 +62,12 @@ python tools/sync_catalogue.py --export-seed     # creates data/universe_seed.sq
 | `LR_RATE_ADMIN` | `60` | Admin requests per minute per address. |
 | `LR_GUTENDEX` | `1` | `0` turns Gutendex enrichment off. |
 | `LR_GUTENDEX_HOURS` / `LR_GUTENDEX_PER_RUN` | `6` / `160` | How often, and how many books (32 per request), one enrichment run looks at. |
-| `LR_GUTENDEX_CENSUS` | `0` | `1` widens enrichment to the whole eligible catalogue, oldest observation first. Only a finished census lets percentile badges appear. Polite but long: about 2,400 requests per language-wide pass. |
+| `LR_GUTENDEX_CENSUS` | off | `fr,zh` observes every book of those languages (about 140 + 15 requests, minutes); `1` does all three (English is about 2,000 requests, hours; weekly refresh). Only a finished census of a language lets its percentile badges appear. Be polite to Gutendex: it is a free service. |
+| `LR_BACKGROUND_SLOTS` | `1` | How many library-growing downloads may run at once. They always wait for a reader's own pick. |
 | `LR_FIRST_WAVE` / `LR_MAX_WAVE` | `3` / `12` | Background wave sizes. |
 | `LR_SOURCE_CONCURRENCY` / `LR_SOURCE_MIN_INTERVAL` | `2` / `2.0` | Simultaneous downloads / seconds between downloads (Gutenberg courtesy). |
+| `LR_MIRROR_BASES` | unset | Comma-separated extra HTTPS mirror base URLs; insecure HTTP bases are ignored. |
+| `LR_ALLOW_WWW` | `0` | Add `www.gutenberg.org` as the final fallback mirror when set to `1`. |
 | `LR_EMBEDDED_WORKER` | `1` | `1`: this process also keeps the catalogue fresh and grows the library. `0`: run `python worker.py` for that. |
 | `LR_OFFLINE_STARTER` | `0` | `1`: always use the small bundled starter shelf (no catalogue). |
 | `LR_SECRET_KEY` | auto | **Set it in production.** Readers' History keeps opaque book keys signed with it; if it changes (a redeploy on a disk that is not kept creates a new one) the keys stop matching and "do not repeat" forgets old books. |
